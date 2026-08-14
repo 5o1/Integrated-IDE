@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-labelledby="title desc">
+  <title id="title">Integrated IDE</title>
+  <desc id="desc">An original cyan pixel wordmark for the Integrated IDE client-side addon.</desc>
+
+  <defs>
+    <!-- Original five-pixel-cap font. The shared top line is intentionally a
+         new drawing, not a copy of any Integrated Dynamics project artwork. -->
+    <g id="cap-i"><rect x="0" y="0" width="3" height="1"/><rect x="1" y="1" width="1" height="5"/><rect x="0" y="6" width="3" height="1"/></g>
+    <g id="cap-d"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="5"/><rect x="3" y="1" width="1" height="1"/><rect x="4" y="2" width="1" height="3"/><rect x="3" y="5" width="1" height="1"/><rect x="0" y="6" width="3" height="1"/></g>
+    <g id="cap-e"><rect x="0" y="0" width="4" height="1"/><rect x="0" y="1" width="1" height="5"/><rect x="1" y="3" width="3" height="1"/><rect x="0" y="6" width="4" height="1"/></g>
+
+    <g id="low-n"><rect x="0" y="2" width="1" height="5"/><rect x="1" y="2" width="2" height="1"/><rect x="3" y="3" width="1" height="4"/></g>
+    <g id="low-t"><rect x="1" y="0" width="1" height="6"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="6" width="1" height="1"/></g>
+    <g id="low-e"><rect x="1" y="2" width="2" height="1"/><rect x="0" y="3" width="1" height="3"/><rect x="1" y="4" width="3" height="1"/><rect x="1" y="6" width="3" height="1"/><rect x="3" y="3" width="1" height="1"/></g>
+    <g id="low-g"><rect x="1" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="3"/><rect x="4" y="3" width="1" height="4"/><rect x="1" y="5" width="3" height="1"/><rect x="1" y="7" width="3" height="1"/></g>
+    <g id="low-r"><rect x="0" y="2" width="1" height="5"/><rect x="1" y="2" width="3" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/></g>
+    <g id="low-a"><rect x="1" y="2" width="2" height="1"/><rect x="3" y="3" width="1" height="4"/><rect x="0" y="4" width="1" height="2"/><rect x="1" y="4" width="2" height="1"/><rect x="1" y="6" width="2" height="1"/></g>
+    <g id="low-d"><rect x="4" y="0" width="1" height="7"/><rect x="1" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="3"/><rect x="1" y="6" width="3" height="1"/></g>
+
+    <g id="word-integrated">
+      <use href="#cap-i"/>
+      <use href="#low-n" transform="translate(4 0)"/>
+      <use href="#low-t" transform="translate(9 0)"/>
+      <use href="#low-e" transform="translate(13 0)"/>
+      <use href="#low-g" transform="translate(18 0)"/>
+      <use href="#low-r" transform="translate(24 0)"/>
+      <use href="#low-a" transform="translate(29 0)"/>
+      <use href="#low-t" transform="translate(34 0)"/>
+      <use href="#low-e" transform="translate(38 0)"/>
+      <use href="#low-d" transform="translate(43 0)"/>
+    </g>
+
+    <g id="word-ide">
+      <use href="#cap-i"/>
+      <use href="#cap-d" transform="translate(5 0)"/>
+      <use href="#cap-e" transform="translate(11 0)"/>
+    </g>
+
+    <filter id="pixel-outline" x="-12%" y="-12%" width="124%" height="128%" color-interpolation-filters="sRGB">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="expanded"/>
+      <feFlood flood-color="#201e1a" result="ink"/>
+      <feComposite in="ink" in2="expanded" operator="in" result="outline"/>
+      <feOffset in="outline" dx="3" dy="4" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="outline"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <linearGradient id="cyan-pixels" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bfffff"/>
+      <stop offset="0.28" stop-color="#61edf4"/>
+      <stop offset="1" stop-color="#28b9d0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Measurements from the official 400px series logos establish a nearly
+       full-width first line and a second line of comparable cap height. -->
+  <g fill="url(#cyan-pixels)" filter="url(#pixel-outline)">
+    <use href="#word-integrated" transform="translate(10 92) scale(7.85 11.5)"/>
+    <use href="#word-ide" transform="translate(88 200) scale(15)"/>
+  </g>
+</svg>
