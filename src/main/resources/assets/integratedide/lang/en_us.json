@@ -1,0 +1,8 @@
+{
+  "integratedide.mode.novel": "Novel",
+  "integratedide.mode.vanilla": "Vanilla",
+  "integratedide.title": "Integrated IDE",
+  "integratedide.hint": "Ctrl+Enter: compile and build   Esc: Vanilla mode",
+  "integratedide.placeholder": "One line each: {x} = global(args); {x}.member(); $item, @mod, #tag",
+  "integratedide.queue": "Variable-card queue"
+}

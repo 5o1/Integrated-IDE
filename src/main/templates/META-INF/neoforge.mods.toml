@@ -7,7 +7,7 @@ displayName="${mod_name}"
 displayURL="https://funclogic.me"
 authors="5o1"
 description='''
-Client-only text programming for Integrated Dynamics Variable Cards.
+Client-side IDE and Logic Programmer enhancement for Integrated Dynamics.
 '''
 
 # This mod is annotated for Dist.CLIENT. Every loader dependency is therefore

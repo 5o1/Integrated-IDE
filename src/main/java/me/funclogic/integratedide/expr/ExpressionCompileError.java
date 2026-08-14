@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.expr;
+package me.funclogic.integratedide.expr;
 
 final class ExpressionCompileError extends RuntimeException {
     private final int position;

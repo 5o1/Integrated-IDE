@@ -1,9 +1,9 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import me.funclogic.integratedscript.expr.ExpressionCompiler;
+import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;

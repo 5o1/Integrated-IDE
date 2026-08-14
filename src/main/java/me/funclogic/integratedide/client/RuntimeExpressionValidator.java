@@ -1,6 +1,6 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
-import me.funclogic.integratedscript.expr.ExpressionCompiler;
+import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;

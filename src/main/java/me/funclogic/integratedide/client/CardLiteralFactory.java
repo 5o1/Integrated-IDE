@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
 import java.util.ArrayList;
 import java.util.HashMap;

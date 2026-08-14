@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;

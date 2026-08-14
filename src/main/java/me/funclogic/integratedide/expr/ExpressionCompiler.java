@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.expr;
+package me.funclogic.integratedide.expr;
 
 import java.util.List;
 import java.util.Map;

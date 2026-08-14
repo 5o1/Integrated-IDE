@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.expr;
+package me.funclogic.integratedide.expr;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

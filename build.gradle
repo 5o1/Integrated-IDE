@@ -205,8 +205,8 @@ publishing {
             artifactId = mod_id
             pom {
                 name = mod_name
-                description = 'Client-only text programming for Integrated Dynamics Variable Cards.'
-                url = 'https://github.com/5o1/integratedscript'
+                description = 'Client-side IDE and Logic Programmer enhancement for Integrated Dynamics.'
+                url = 'https://github.com/5o1/Integrated-IDE'
                 licenses {
                     license {
                         name = 'MIT License'
@@ -220,9 +220,9 @@ publishing {
                     }
                 }
                 scm {
-                    connection = 'scm:git:https://github.com/5o1/integratedscript.git'
-                    developerConnection = 'scm:git:ssh://github.com/5o1/integratedscript.git'
-                    url = 'https://github.com/5o1/integratedscript'
+                    connection = 'scm:git:https://github.com/5o1/Integrated-IDE.git'
+                    developerConnection = 'scm:git:ssh://github.com/5o1/Integrated-IDE.git'
+                    url = 'https://github.com/5o1/Integrated-IDE'
                 }
             }
         }
@@ -230,7 +230,7 @@ publishing {
     repositories {
         maven {
             name = 'GitHubPackages'
-            url = uri('https://maven.pkg.github.com/5o1/integratedscript')
+            url = uri('https://maven.pkg.github.com/5o1/Integrated-IDE')
             credentials {
                 username = System.getenv('GITHUB_ACTOR') ?: findProperty('gpr.user')
                 password = System.getenv('GITHUB_TOKEN') ?: findProperty('gpr.key')

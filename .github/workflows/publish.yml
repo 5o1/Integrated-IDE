@@ -47,8 +47,8 @@ jobs:
       - name: Upload installable mod JAR
         uses: actions/upload-artifact@v4
         with:
-          name: integratedscript-${{ github.ref_name }}
-          path: build/libs/integratedscript-*.jar
+          name: integratedide-${{ github.ref_name }}
+          path: build/libs/integratedide-*.jar
           if-no-files-found: error
           retention-days: 90
 
@@ -56,4 +56,4 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/libs/integratedscript-*.jar --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" build/libs/integratedide-*.jar --verify-tag --generate-notes

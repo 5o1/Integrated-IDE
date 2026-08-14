@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.expr;
+package me.funclogic.integratedide.expr;
 
 record ExpressionToken(ExpressionToken.Type type, String text, int position) {
     enum Type {

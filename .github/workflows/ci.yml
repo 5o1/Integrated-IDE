@@ -36,8 +36,8 @@ jobs:
       - name: Upload installable mod JAR
         uses: actions/upload-artifact@v4
         with:
-          name: integratedscript-${{ github.sha }}
-          path: build/libs/integratedscript-*.jar
+          name: integratedide-${{ github.sha }}
+          path: build/libs/integratedide-*.jar
           if-no-files-found: error
           retention-days: 14
 

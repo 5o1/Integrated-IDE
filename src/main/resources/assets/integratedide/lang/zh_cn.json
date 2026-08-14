@@ -1,0 +1,8 @@
+{
+  "integratedide.mode.novel": "Novel",
+  "integratedide.mode.vanilla": "香草",
+  "integratedide.title": "Integrated IDE",
+  "integratedide.hint": "Ctrl+Enter：检查并生成；Esc：香草模式",
+  "integratedide.placeholder": "按行输入：{x} = 全局函数(参数)；{x}.成员函数()；$物品、@模组、#标签",
+  "integratedide.queue": "变量卡队列"
+}

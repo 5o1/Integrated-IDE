@@ -1,4 +1,4 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
 import com.mojang.logging.LogUtils;
 import java.util.Collections;

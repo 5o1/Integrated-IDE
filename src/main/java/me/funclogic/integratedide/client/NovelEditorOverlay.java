@@ -1,7 +1,7 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
 import java.util.List;
-import me.funclogic.integratedscript.expr.ExpressionCompiler;
+import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -70,10 +70,10 @@ final class NovelEditorOverlay {
         this.editor = MultiLineEditBox.builder()
                 .setX(workX + EDITOR_PADDING)
                 .setY(workY + EDITOR_PADDING)
-                .setPlaceholder(Component.translatable("integratedscript.placeholder"))
+                .setPlaceholder(Component.translatable("integratedide.placeholder"))
                 .setShowBackground(false)
                 .build(font, WORK_WIDTH - EDITOR_PADDING * 2, WORK_HEIGHT - STATUS_HEIGHT - EDITOR_PADDING * 2,
-                        Component.translatable("integratedscript.title"));
+                        Component.translatable("integratedide.title"));
         this.editor.setCharacterLimit(8_192);
         this.editor.setLineLimit(128);
         this.catalog = LogicProgrammerCatalog.create();

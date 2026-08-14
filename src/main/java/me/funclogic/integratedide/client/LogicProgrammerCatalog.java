@@ -1,6 +1,6 @@
-package me.funclogic.integratedscript.client;
+package me.funclogic.integratedide.client;
 
-import me.funclogic.integratedscript.expr.ExpressionCompiler;
+import me.funclogic.integratedide.expr.ExpressionCompiler;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;

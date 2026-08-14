@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Integrated Script is licensed under the MIT License; see LICENSE.
+Integrated IDE is licensed under the MIT License; see LICENSE.
 
 The release JAR does not bundle third-party code or libraries. It calls APIs
 provided by these separately installed runtime dependencies:
