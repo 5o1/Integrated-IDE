@@ -1,0 +1,8 @@
+{
+  "integratedscript.mode.novel": "Novel",
+  "integratedscript.mode.vanilla": "Vanilla",
+  "integratedscript.title": "Integrated Script",
+  "integratedscript.hint": "Ctrl+Enter: compile and build   Esc: Vanilla mode",
+  "integratedscript.placeholder": "One line each: {x} = global(args); {x}.member(); $item, @mod, #tag",
+  "integratedscript.queue": "Variable-card queue"
+}

@@ -1,0 +1,8 @@
+{
+  "integratedscript.mode.novel": "Novel",
+  "integratedscript.mode.vanilla": "香草",
+  "integratedscript.title": "动态联合脚本",
+  "integratedscript.hint": "Ctrl+Enter：检查并生成；Esc：香草模式",
+  "integratedscript.placeholder": "按行输入：{x} = 全局函数(参数)；{x}.成员函数()；$物品、@模组、#标签",
+  "integratedscript.queue": "变量卡队列"
+}

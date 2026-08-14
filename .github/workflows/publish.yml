@@ -1,0 +1,58 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    # Release tags must match the Minecraft-mod version in gradle.properties,
+    # for example 26.1.2-0.1.0.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, '26.1.2-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify release tag
+        if: github.event_name == 'push'
+        run: test "$GITHUB_REF_NAME" = "$(./gradlew -q properties --no-daemon | awk '/^version: / { print $2; exit }')"
+
+      - name: Build, test, and publish Maven package
+        run: ./gradlew clean build publish --no-daemon --stacktrace
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installable mod JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: integratedscript-${{ github.ref_name }}
+          path: build/libs/integratedscript-*.jar
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create GitHub release with installable JAR
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/libs/integratedscript-*.jar --verify-tag --generate-notes
