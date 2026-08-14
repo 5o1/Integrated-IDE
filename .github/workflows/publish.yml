@@ -51,10 +51,12 @@ jobs:
           files: build/libs/integratedide-*.jar
           name: Integrated IDE ${{ github.ref_name }}
           version: ${{ github.ref_name }}
-          version-type: alpha
+          version-type: ${{ endsWith(github.ref_name, '-alpha') && 'alpha' || endsWith(github.ref_name, '-beta') && 'beta' || 'release' }}
           changelog: Automated release built from Git tag ${{ github.ref_name }}.
           loaders: neoforge
+          environment: client
           game-versions: 26.1.2
+          java: 25
           curseforge-id: ${{ vars.CURSEFORGE_PROJECT_ID }}
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           curseforge-dependencies: |
@@ -74,4 +76,9 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/libs/integratedide-*.jar --verify-tag --generate-notes
+        run: |
+          release_args=("$GITHUB_REF_NAME" build/libs/integratedide-*.jar --verify-tag --generate-notes)
+          if [[ "$GITHUB_REF_NAME" == *-alpha || "$GITHUB_REF_NAME" == *-beta ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
