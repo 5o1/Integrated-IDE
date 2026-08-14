@@ -44,6 +44,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish installable JAR to CurseForge
+        if: github.event_name == 'push'
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          files: build/libs/integratedide-*.jar
+          name: Integrated IDE ${{ github.ref_name }}
+          version: ${{ github.ref_name }}
+          version-type: alpha
+          changelog: Automated release built from Git tag ${{ github.ref_name }}.
+          loaders: neoforge
+          game-versions: 26.1.2
+          curseforge-id: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          curseforge-dependencies: |
+            integrated-dynamics(required)
+            cyclops-core(required)
+            common-capabilities(required)
+
       - name: Upload installable mod JAR
         uses: actions/upload-artifact@v4
         with:
