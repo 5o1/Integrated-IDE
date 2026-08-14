@@ -32,8 +32,15 @@ repositories {
     // artifacts are still supplied by ModDevGradle's NeoForge repository.
     mavenCentral()
 
-    flatDir {
-        dirs '../../mods'
+    // The exact runtime API jars are published by their maintainers through
+    // Modrinth's Maven endpoint. This keeps local development and GitHub CI
+    // reproducible without depending on an instance-local mods directory.
+    maven {
+        name = 'Modrinth'
+        url = uri('https://api.modrinth.com/maven')
+        content {
+            includeGroup 'maven.modrinth'
+        }
     }
 }
 
@@ -117,14 +124,13 @@ configurations {
 }
 
 dependencies {
-    // This mod only calls APIs supplied by the already-installed Integrated Dynamics client.
-    // Neither dependency is bundled in the output JAR.
-    compileOnly name: "integrateddynamics-${integrateddynamics_artifact}"
-    compileOnly name: "cyclopscore-${cyclopscore_artifact}"
-    compileOnly name: "commoncapabilities-${commoncapabilities_artifact}"
-    localRuntime name: "integrateddynamics-${integrateddynamics_artifact}"
-    localRuntime name: "cyclopscore-${cyclopscore_artifact}"
-    localRuntime name: "commoncapabilities-${commoncapabilities_artifact}"
+    // These are compile/run inputs only; the release JAR never bundles them.
+    compileOnly "maven.modrinth:yYzdQHJI:${integrateddynamics_modrinth_version}"
+    compileOnly "maven.modrinth:Z9DM0LJ4:${cyclopscore_modrinth_version}"
+    compileOnly "maven.modrinth:oFXrCkDI:${commoncapabilities_modrinth_version}"
+    localRuntime "maven.modrinth:yYzdQHJI:${integrateddynamics_modrinth_version}"
+    localRuntime "maven.modrinth:Z9DM0LJ4:${cyclopscore_modrinth_version}"
+    localRuntime "maven.modrinth:oFXrCkDI:${commoncapabilities_modrinth_version}"
     testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
