@@ -36,7 +36,8 @@ jobs:
 
       - name: Verify release tag
         if: github.event_name == 'push'
-        run: test "$GITHUB_REF_NAME" = "$(./gradlew -q properties --no-daemon | awk '/^version: / { print $2; exit }')"
+        run: |
+          test "$GITHUB_REF_NAME" = "$(./gradlew -q properties --no-daemon | awk '/^version: / { print $2; exit }')"
 
       - name: Build, test, and publish Maven package
         run: ./gradlew clean build publish --no-daemon --stacktrace
