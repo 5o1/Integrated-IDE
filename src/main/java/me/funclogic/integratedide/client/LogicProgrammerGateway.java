@@ -23,7 +23,7 @@ import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeSlo
 import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeStringValueChangedPacket;
 
 /** The only class allowed to translate a plan step into Integrated Dynamics GUI packets. */
-final class LogicProgrammerGateway {
+final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
     private final ContainerLogicProgrammerBase menu;
 
     LogicProgrammerGateway(ContainerLogicProgrammerBase menu) {
@@ -51,16 +51,27 @@ final class LogicProgrammerGateway {
     }
 
     void select(ExpressionCompiler.CardStep step) {
-        if (step.kind() == ExpressionCompiler.StepKind.DYNAMIC_OPERATOR) {
-            IOperator operator = resolveOperator(step.value());
-            OperatorLPElement element = new OperatorLPElement(operator);
-            activate(LogicProgrammerElementTypes.OPERATOR.getUniqueName(), LogicProgrammerElementTypes.OPERATOR.getName(element));
-            return;
-        }
-        activateValueType(resolveValueType(step.outputTypeId()));
+        LogicProgrammerPlanDispatcher.select(step, this);
     }
 
     void configure(ExpressionCompiler.CardStep step) {
+        LogicProgrammerPlanDispatcher.configure(step, this);
+    }
+
+    @Override
+    public void selectOperator(String operatorId) {
+        IOperator operator = resolveOperator(operatorId);
+        OperatorLPElement element = new OperatorLPElement(operator);
+        activate(LogicProgrammerElementTypes.OPERATOR.getUniqueName(), LogicProgrammerElementTypes.OPERATOR.getName(element));
+    }
+
+    @Override
+    public void selectValueType(String valueTypeId) {
+        activateValueType(resolveValueType(valueTypeId));
+    }
+
+    @Override
+    public void configureLiteral(ExpressionCompiler.CardStep step) {
         switch (step.kind()) {
             case STATIC_TEXT, STATIC_MOD -> send(new LogicProgrammerValueTypeStringValueChangedPacket(step.value()));
             case STATIC_BOOLEAN -> send(new LogicProgrammerValueTypeBooleanValueChangedPacket(Boolean.parseBoolean(step.value())));
@@ -68,9 +79,8 @@ final class LogicProgrammerGateway {
             case STATIC_FLUID -> send(new LogicProgrammerValueTypeSlottedValueChangedPacket(CardLiteralFactory.fluidBucket(step.value())));
             case STATIC_TAG -> send(new LogicProgrammerValueTypeIngredientsValueChangedPacket(ValueDeseralizationContext.ofClient(),
                     CardLiteralFactory.ingredientsTag(step.value())));
-            case DYNAMIC_OPERATOR -> {
-                // Operator elements have no separate configuration packet.
-            }
+            case DYNAMIC_OPERATOR, EXTERNAL_REFERENCE -> throw new IllegalArgumentException(
+                    "Only static literals can be configured in the Logic Programmer.");
         }
     }
 

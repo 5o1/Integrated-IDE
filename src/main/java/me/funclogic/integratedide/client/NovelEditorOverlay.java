@@ -12,6 +12,7 @@ import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import org.cyclops.integrateddynamics.client.gui.container.ContainerScreenLogicProgrammerBase;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
 import org.lwjgl.glfw.GLFW;
@@ -33,6 +34,8 @@ final class NovelEditorOverlay {
     private static final int MAX_COMPLETIONS = 5;
     private static final int MAX_SOURCE_CHARACTERS = 8_192;
     private static final int EMPTY_GUIDE_LINES = 8;
+    private static final float GUIDE_SCALE = 0.75F;
+    private static final int GUIDE_LINE_HEIGHT = 7;
     // This is the original Logic Programmer's write-card slot. Keeping these
     // coordinates makes Novel mode visually continuous with vanilla mode.
     private static final int NATIVE_CARD_SLOT_X = 232;
@@ -430,7 +433,6 @@ final class NovelEditorOverlay {
         graphics.text(font, visibleStatus, Math.round((workX + 5) / 0.75F), Math.round(statusY / 0.75F), statusColor(), false);
         graphics.pose().popMatrix();
         renderCardCapacity(graphics);
-        renderEditorCharacterCount(graphics);
         renderEmptyEditorGuide(graphics);
         renderExternalReferences(graphics);
         renderMissingCachedNodeMarkers(graphics);
@@ -445,16 +447,20 @@ final class NovelEditorOverlay {
         }
         int x = editor.getX() + EDITOR_PADDING;
         int y = editor.getY() + EDITOR_PADDING;
-        int maxWidth = Math.round((editor.getWidth() - EDITOR_PADDING * 2) / 0.75F);
+        int maxWidth = Math.round((editor.getWidth() - EDITOR_PADDING * 2) / GUIDE_SCALE);
+        int visualLine = 0;
         graphics.pose().pushMatrix();
-        graphics.pose().scale(0.75F, 0.75F);
+        graphics.pose().scale(GUIDE_SCALE, GUIDE_SCALE);
         for (int line = 1; line <= EMPTY_GUIDE_LINES; line++) {
             Component shortcut = line == 1 ? IntegratedIdeKeyMappings.COMPILE_NOVEL.getTranslatedKeyMessage()
                     : line == 2 ? IntegratedIdeKeyMappings.REQUEST_COMPLETION.getTranslatedKeyMessage() : Component.empty();
-            String guide = Component.translatable("integratedide.guide." + line, shortcut).getString();
-            String visible = font.plainSubstrByWidth(guide, maxWidth);
-            graphics.text(font, visible, Math.round(x / 0.75F), Math.round((y + (line - 1) * 8) / 0.75F),
-                    0xFF8A8A8A, false);
+            List<FormattedCharSequence> wrapped = font.split(
+                    Component.translatable("integratedide.guide." + line, shortcut), maxWidth);
+            for (FormattedCharSequence visualLineText : wrapped) {
+                graphics.text(font, visualLineText, Math.round(x / GUIDE_SCALE),
+                        Math.round((y + visualLine * GUIDE_LINE_HEIGHT) / GUIDE_SCALE), 0xFF8A8A8A, false);
+                visualLine++;
+            }
         }
         graphics.pose().popMatrix();
     }
@@ -536,13 +542,22 @@ final class NovelEditorOverlay {
         int available = CardBuildDriver.countBlankVariableCards(player);
         int freeSlots = CardInventory.countEmptyPlayerSlots(player);
         String capacity = required + "/" + available + "/" + freeSlots;
+        int left = nativeCardSlotX() + 1;
         int right = nativeCardSlotX() + CARD_SLOT_SIZE - 1;
+        int top = nativeCardSlotY() + 1;
         int bottom = nativeCardSlotY() + CARD_SLOT_SIZE - 1;
-        int x = right - font.width(capacity) - 2;
-        int y = bottom - font.lineHeight - 1;
+        float scale = Math.min((right - left - 2F) / font.width(capacity),
+                (bottom - top - 2F) / font.lineHeight);
+        int width = Math.round(font.width(capacity) * scale);
+        int height = Math.round(font.lineHeight * scale);
+        int x = right - width - 1;
+        int y = bottom - height - 1;
         int color = available >= required && freeSlots >= required ? 0xFF9CCF9C : 0xFFE08080;
-        graphics.fill(x - 2, y - 1, right, bottom, 0xD0101010);
-        graphics.text(font, capacity, x, y, color, false);
+        graphics.fill(Math.max(left, x - 1), Math.max(top, y - 1), right, bottom, 0xD0101010);
+        graphics.pose().pushMatrix();
+        graphics.pose().scale(scale, scale);
+        graphics.text(font, capacity, Math.round(x / scale), Math.round(y / scale), color, false);
+        graphics.pose().popMatrix();
     }
 
     private int requiredBlankCards(net.minecraft.world.entity.player.Player player) {
@@ -881,6 +896,10 @@ final class NovelEditorOverlay {
         graphics.fill(workX + 2, workY + WORK_HEIGHT - STATUS_HEIGHT, slotX - 2,
                 workY + WORK_HEIGHT - STATUS_HEIGHT + 1, 0xFF4A4A4A);
         renderEditorCharacterCountBackground(graphics);
+        // Draw the label before the editor's widget render. Its dark backing
+        // and text are deliberately behind user input, so typing in the lower
+        // right corner remains completely readable.
+        renderEditorCharacterCount(graphics);
     }
 
     private void renderEditorCharacterCountBackground(GuiGraphicsExtractor graphics) {
