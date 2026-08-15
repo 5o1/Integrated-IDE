@@ -5,12 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import org.cyclops.integrateddynamics.api.evaluate.operator.IOperator;
-import org.cyclops.integrateddynamics.api.evaluate.variable.IValueType;
 import org.cyclops.integrateddynamics.core.evaluate.operator.Operators;
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +32,7 @@ class IntegratedDynamicsRegistryTest {
         assertTrue(compilation.message().contains("No registered global function named 'equals'"));
     }
 
-    /** Uses the live registry map for names and signatures; unsupported calls must not be silently invented in tests. */
+    /** Uses the live registry map for names; unsupported calls must not be silently invented in tests. */
     private static final class RegistryBackedCatalog implements ExpressionCompiler.Catalog {
         private final Map<String, IOperator> globals;
 
@@ -45,11 +42,10 @@ class IntegratedDynamicsRegistryTest {
 
         @Override
         public ExpressionCompiler.FunctionInfo globalFunction(String name) {
-            IOperator operator = globals.get(name);
-            if (operator == null) {
-                return null;
+            if (globals.containsKey(name)) {
+                throw new AssertionError("The regression expression must be rejected before its arguments are parsed.");
             }
-            return function(operator);
+            return null;
         }
 
         @Override
@@ -66,18 +62,6 @@ class IntegratedDynamicsRegistryTest {
         @Override
         public boolean isAssignable(ExpressionCompiler.TypeInfo actual, ExpressionCompiler.TypeInfo expected) {
             return actual.equals(expected);
-        }
-
-        private static ExpressionCompiler.FunctionInfo function(IOperator operator) {
-            List<ExpressionCompiler.TypeInfo> inputs = Stream.of(operator.getInputTypes())
-                    .map(IntegratedDynamicsRegistryTest::type)
-                    .toList();
-            return new ExpressionCompiler.FunctionInfo(operator.getUniqueName().toString(), operator.getGlobalInteractName(),
-                    inputs, type(operator.getOutputType()), operator.getRequiredInputLength());
-        }
-
-        private static ExpressionCompiler.TypeInfo type(IValueType<?> valueType) {
-            return new ExpressionCompiler.TypeInfo(valueType.getUniqueName().toString(), valueType.getTypeName());
         }
     }
 }
