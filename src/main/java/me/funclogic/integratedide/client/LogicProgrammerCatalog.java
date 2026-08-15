@@ -125,7 +125,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         }
         for (Map.Entry<String, Map<String, ExpressionCompiler.FunctionInfo>> entry : members.entrySet()) {
             IValueType<?> scope = valuesById.get(entry.getKey());
-            if (scope != null && actual.correspondsTo(scope) && entry.getValue().containsKey(name)) {
+            if (scope != null && scope.correspondsTo(actual) && entry.getValue().containsKey(name)) {
                 return entry.getValue().get(name);
             }
         }
@@ -152,7 +152,9 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         }
         IValueType<?> actual = valuesById.get(actualType.id());
         IValueType<?> expected = valuesById.get(expectedType.id());
-        return actual != null && expected != null && actual.correspondsTo(expected);
+        // Integrated Dynamics categories (such as any and number) accept their
+        // concrete members, so compatibility is defined by the required type.
+        return actual != null && expected != null && expected.correspondsTo(actual);
     }
 
     public ExpressionCompiler.Compilation compile(String source) {

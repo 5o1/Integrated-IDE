@@ -31,7 +31,7 @@ class IntegratedDynamicsRegistryTest {
         assertTrue(compilation.message().contains("No registered global function named 'equals'"));
         assertTrue(compilation.message().contains("anyEquals(...)"));
 
-        var corrected = catalog.compile("anyEquals(\"$minecraft:cobblestone\".withSize(10).size(), 10.toLong())");
+        var corrected = catalog.compile("anyEquals(\"$minecraft:cobblestone\".withSize(10).size(), 10)");
         assertTrue(corrected.valid(), corrected.message());
     }
 }
