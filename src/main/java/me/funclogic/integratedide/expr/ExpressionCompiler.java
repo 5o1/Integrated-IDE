@@ -39,15 +39,16 @@ public final class ExpressionCompiler {
         }
     }
 
-    public record Compilation(List<CardStep> steps, String rootId, Map<String, TypeInfo> virtualTypes,
-                              int errorPosition, String message) {
-        static Compilation success(List<CardStep> steps, String rootId, Map<String, TypeInfo> virtualTypes,
-                                   String message) {
-            return new Compilation(List.copyOf(steps), rootId, Map.copyOf(virtualTypes), -1, message);
+    public record Compilation(List<CardStep> steps, String rootId, List<StatementRoot> statementRoots,
+                              Map<String, TypeInfo> virtualTypes, int errorPosition, String message) {
+        static Compilation success(List<CardStep> steps, String rootId, List<StatementRoot> statementRoots,
+                                   Map<String, TypeInfo> virtualTypes, String message) {
+            return new Compilation(List.copyOf(steps), rootId, List.copyOf(statementRoots), Map.copyOf(virtualTypes),
+                    -1, message);
         }
 
         static Compilation failure(int position, String message) {
-            return new Compilation(List.of(), null, Map.of(), position,
+            return new Compilation(List.of(), null, List.of(), Map.of(), position,
                     "Error (character " + (position + 1) + "): " + message);
         }
 
@@ -66,6 +67,10 @@ public final class ExpressionCompiler {
         public boolean createsVariableCard() {
             return kind != StepKind.EXTERNAL_REFERENCE;
         }
+    }
+
+    /** The top-level expression associated with one source statement. */
+    public record StatementRoot(int sourceStart, int sourceEnd, String stepId) {
     }
 
     public enum StepKind {

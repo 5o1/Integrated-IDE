@@ -4,5 +4,16 @@
   "integratedide.title": "Integrated IDE",
   "integratedide.hint": "Ctrl+Enter：检查并生成；Esc：香草模式",
   "integratedide.placeholder": "按行输入：{x} = 全局函数(参数)；{x}.成员函数()；$物品、@模组、#标签",
-  "integratedide.queue": "变量卡队列"
+  "integratedide.guide.1": "%s：检查并编译；再次按下重建缺失卡。",
+  "integratedide.guide.2": "%s：打开补全；↑↓选择，Tab 插入。",
+  "integratedide.guide.3": "每行一条表达式；可选 {x}=表达式。",
+  "integratedide.guide.4": "后续行可用 {x}；全局：函数(参数)。",
+  "integratedide.guide.5": "成员调用：对象.函数(参数)。",
+  "integratedide.guide.6": "字面量：\"文本\"、42、true、\"$物品\"。",
+  "integratedide.guide.7": "资源：\"@模组\"、\"#标签\"；{123} 引用卡。",
+  "integratedide.guide.8": "// 后均为注释，不参与编译。",
+  "integratedide.queue": "变量卡队列",
+  "key.category.integratedide.integrated_ide": "Integrated IDE",
+  "key.integratedide.compile": "编译 Novel 脚本",
+  "key.integratedide.completion": "请求 Novel 补全"
 }

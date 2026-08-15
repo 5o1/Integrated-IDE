@@ -35,4 +35,14 @@ class PartialCallAnalysisTest {
         assertEquals("{value}", call.receiver());
         assertFalse(call.emptyArgument());
     }
+
+    @Test
+    void recognizesCommentsButNotDoubleSlashesInsideStrings() {
+        String comment = "join(\"a\", \"b\") // explain call";
+        String string = "join(\"https://example.invalid\", \"b\")";
+
+        assertTrue(PartialCallAnalysis.isInLineComment(comment, comment.length()));
+        assertTrue(PartialCallAnalysis.at(comment, comment.length()).isEmpty());
+        assertFalse(PartialCallAnalysis.isInLineComment(string, string.length()));
+    }
 }

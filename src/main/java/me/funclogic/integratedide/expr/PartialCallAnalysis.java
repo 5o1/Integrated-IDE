@@ -18,12 +18,22 @@ public final class PartialCallAnalysis {
     public static Optional<CallSite> at(String source, int cursor) {
         String input = source == null ? "" : source;
         int limit = Math.max(0, Math.min(cursor, input.length()));
+        if (isInLineComment(input, limit)) {
+            return Optional.empty();
+        }
         Deque<OpenCall> calls = new ArrayDeque<>();
         boolean inString = false;
         boolean escaped = false;
+        boolean inLineComment = false;
 
         for (int index = 0; index < limit; index++) {
             char character = input.charAt(index);
+            if (inLineComment) {
+                if (character == '\r' || character == '\n') {
+                    inLineComment = false;
+                }
+                continue;
+            }
             if (inString) {
                 if (escaped) {
                     escaped = false;
@@ -36,6 +46,11 @@ public final class PartialCallAnalysis {
             }
             if (character == '"') {
                 inString = true;
+                continue;
+            }
+            if (character == '/' && index + 1 < limit && input.charAt(index + 1) == '/') {
+                inLineComment = true;
+                index++;
                 continue;
             }
             if (character == '(') {
@@ -60,6 +75,35 @@ public final class PartialCallAnalysis {
         }
         return Optional.of(new CallSite(current.name, current.receiver, current.argumentIndex,
                 onlyWhitespace(input, current.argumentStart, limit)));
+    }
+
+    /** Returns whether the cursor is after a // marker on its current source line. */
+    public static boolean isInLineComment(String source, int cursor) {
+        String input = source == null ? "" : source;
+        int limit = Math.max(0, Math.min(cursor, input.length()));
+        int lineStart = Math.max(input.lastIndexOf('\n', Math.max(0, limit - 1)),
+                input.lastIndexOf('\r', Math.max(0, limit - 1))) + 1;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int index = lineStart; index < limit; index++) {
+            char character = input.charAt(index);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (character == '\\') {
+                    escaped = true;
+                } else if (character == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (character == '"') {
+                inString = true;
+            } else if (character == '/' && index + 1 < limit && input.charAt(index + 1) == '/') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean onlyWhitespace(String source, int start, int end) {

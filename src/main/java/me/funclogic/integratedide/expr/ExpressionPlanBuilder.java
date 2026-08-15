@@ -20,17 +20,18 @@ final class ExpressionPlanBuilder {
     }
 
     ExpressionCompiler.Compilation compile(ExpressionSyntax.Program program) {
-        String root = lower(program);
+        LoweredProgram lowered = lower(program);
         int created = (int) steps.stream().filter(ExpressionCompiler.CardStep::createsVariableCard).count();
-        return ExpressionCompiler.Compilation.success(steps, root, virtualTypes,
+        return ExpressionCompiler.Compilation.success(steps, lowered.rootId(), lowered.statementRoots(), virtualTypes,
                 "Valid: " + created + " Variable Card(s) will be created.");
     }
 
-    private String lower(ExpressionSyntax.Program program) {
+    private LoweredProgram lower(ExpressionSyntax.Program program) {
         if (program.statements().isEmpty()) {
             throw new ExpressionCompileError(0, "Enter one or more statements.");
         }
         String root = null;
+        List<ExpressionCompiler.StatementRoot> statementRoots = new ArrayList<>();
         for (ExpressionSyntax.Statement statement : program.statements()) {
             if (statement instanceof ExpressionSyntax.Assignment assignment) {
                 if (virtualValues.containsKey(assignment.name())) {
@@ -41,11 +42,14 @@ final class ExpressionPlanBuilder {
                 virtualValues.put(assignment.name(), value);
                 virtualTypes.put(assignment.name(), value.type());
                 root = value.id();
+                statementRoots.add(new ExpressionCompiler.StatementRoot(assignment.position(), assignment.end(), root));
             } else if (statement instanceof ExpressionSyntax.ExpressionStatement expressionStatement) {
                 root = lower(expressionStatement.expression(), null).id();
+                statementRoots.add(new ExpressionCompiler.StatementRoot(expressionStatement.position(),
+                        expressionStatement.end(), root));
             }
         }
-        return root;
+        return new LoweredProgram(root, List.copyOf(statementRoots));
     }
 
     private PlanValue lower(ExpressionSyntax.Expr expression, ExpressionCompiler.TypeInfo expectedType) {
@@ -150,5 +154,8 @@ final class ExpressionPlanBuilder {
     }
 
     private record PlanValue(String id, ExpressionCompiler.TypeInfo type) {
+    }
+
+    private record LoweredProgram(String rootId, List<ExpressionCompiler.StatementRoot> statementRoots) {
     }
 }

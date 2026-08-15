@@ -28,6 +28,13 @@ final class ExpressionLexer {
                 tokens.add(new ExpressionToken(ExpressionToken.Type.NEWLINE, "\\n", start));
                 continue;
             }
+            if (character == '/' && cursor + 1 < source.length() && source.charAt(cursor + 1) == '/') {
+                cursor += 2;
+                while (cursor < source.length() && source.charAt(cursor) != '\r' && source.charAt(cursor) != '\n') {
+                    cursor++;
+                }
+                continue;
+            }
             ExpressionToken.Type punctuation = punctuation(character);
             if (punctuation != null) {
                 tokens.add(new ExpressionToken(punctuation, Character.toString(character), cursor++));

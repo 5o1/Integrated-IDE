@@ -139,6 +139,9 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     }
 
     public Signature signatureAt(String source, int cursor) {
+        if (PartialCallAnalysis.isInLineComment(source, cursor)) {
+            return null;
+        }
         return PartialCallAnalysis.at(source, cursor).map(call -> {
             ExpressionCompiler.FunctionInfo function;
             int receiverArguments;
@@ -159,6 +162,9 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     }
 
     public boolean hasAutomaticCompletionTrigger(String source, int cursor) {
+        if (PartialCallAnalysis.isInLineComment(source, cursor)) {
+            return false;
+        }
         String token = currentToken(beforeCursor(source, cursor));
         if (token.startsWith("\"$") || token.startsWith("\"@") || token.startsWith("\"#")) {
             return token.length() > 2;
@@ -171,6 +177,9 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
 
     public List<Completion> completions(String source, int cursor, ExpressionCompiler.TypeInfo expectedType,
                                         boolean explicitlyRequested) {
+        if (PartialCallAnalysis.isInLineComment(source, cursor)) {
+            return List.of();
+        }
         String beforeCursor = beforeCursor(source, cursor);
         String token = currentToken(beforeCursor);
         if (token.startsWith("\"$")) {

@@ -94,6 +94,16 @@ class ExpressionCompilerTest {
     }
 
     @Test
+    void acceptsLineCommentsWithoutChangingStatementRoots() {
+        var compilation = ExpressionCompiler.compile("join(\"a\", \"b\") // build greeting\n// ignored line\n{42} // card", catalog());
+
+        assertTrue(compilation.valid(), compilation.message());
+        assertEquals(2, compilation.statementRoots().size());
+        assertEquals(0, compilation.statementRoots().getFirst().sourceStart());
+        assertEquals("42", compilation.steps().getLast().value());
+    }
+
+    @Test
     void keepsEscapedStringsWhenLexingAndLowering() {
         var compilation = ExpressionCompiler.compile("join(\"first\\nline\", \"second\")", catalog());
 

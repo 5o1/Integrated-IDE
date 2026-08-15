@@ -32,6 +32,7 @@ final class NovelEditorOverlay {
     private static final int EDITOR_PADDING = 4;
     private static final int MAX_COMPLETIONS = 5;
     private static final int MAX_SOURCE_CHARACTERS = 8_192;
+    private static final int EMPTY_GUIDE_LINES = 8;
     // This is the original Logic Programmer's write-card slot. Keeping these
     // coordinates makes Novel mode visually continuous with vanilla mode.
     private static final int NATIVE_CARD_SLOT_X = 232;
@@ -52,6 +53,7 @@ final class NovelEditorOverlay {
     private List<LogicProgrammerCatalog.Completion> completions = List.of();
     private LogicProgrammerCatalog.Signature signature;
     private ExpressionCompiler.Compilation compilation;
+    private NovelCompilationCache.Reconciliation previewReconciliation;
     private CardBuildDriver driver;
     private NovelCompilationCache.Reconciliation activeReconciliation;
     private List<NovelCompilationCache.MissingNode> missingCachedNodes = List.of();
@@ -81,7 +83,7 @@ final class NovelEditorOverlay {
         this.editor = MultiLineEditBox.builder()
                 .setX(workX + EDITOR_PADDING)
                 .setY(workY + EDITOR_PADDING)
-                .setPlaceholder(Component.translatable("integratedide.placeholder"))
+                .setPlaceholder(Component.empty())
                 .setShowBackground(false)
                 .build(font, WORK_WIDTH - EDITOR_PADDING * 2, WORK_HEIGHT - STATUS_HEIGHT - EDITOR_PADDING * 2,
                         Component.translatable("integratedide.title"));
@@ -150,14 +152,14 @@ final class NovelEditorOverlay {
         // element renderer. Extract it again after the opaque panel so the
         // editor is the topmost control in the configuration region.
         editor.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        renderForeground(graphics);
+        renderForeground(graphics, mouseX, mouseY);
     }
 
     boolean handleKeyPressed(KeyEvent event) {
         if (!novelMode || !editorFocused) {
             return false;
         }
-        if (event.key() == GLFW.GLFW_KEY_SPACE && event.hasControlDown()) {
+        if (IntegratedIdeKeyMappings.REQUEST_COMPLETION.matches(event)) {
             completionExplicitlyRequested = true;
             refreshCompletions();
             return true;
@@ -174,7 +176,7 @@ final class NovelEditorOverlay {
             selectedCompletion = (selectedCompletion + completions.size() - 1) % completions.size();
             return true;
         }
-        if (event.isConfirmation() && event.hasControlDown()) {
+        if (IntegratedIdeKeyMappings.COMPILE_NOVEL.matches(event)) {
             compileAndBuild();
             return true;
         }
@@ -287,6 +289,7 @@ final class NovelEditorOverlay {
         }
         completionExplicitlyRequested = false;
         compilation = catalog.compile(editor.getValue());
+        previewReconciliation = compilation.valid() ? session.reconcile(compilation) : null;
         status = validationStatus(compilation);
         refreshCompletions();
     }
@@ -304,6 +307,7 @@ final class NovelEditorOverlay {
         }
         if (driver != null && driver.isComplete() && !buildCommitted) {
             session.commit(compilation, activeReconciliation, driver.producedCards());
+            previewReconciliation = session.reconcile(compilation);
             buildCommitted = true;
             status = "\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002";
         }
@@ -314,6 +318,7 @@ final class NovelEditorOverlay {
             return;
         }
         compilation = catalog.compile(editor.getValue());
+        previewReconciliation = compilation.valid() ? session.reconcile(compilation) : null;
         if (!compilation.valid()) {
             status = compilation.message();
             return;
@@ -358,6 +363,7 @@ final class NovelEditorOverlay {
         }
         if (required == 0) {
             session.commit(compilation, activeReconciliation, selection.availableCards());
+            previewReconciliation = session.reconcile(compilation);
             status = "无需新建变量卡，已复用缓存图。";
             return;
         }
@@ -411,7 +417,7 @@ final class NovelEditorOverlay {
         refreshCompletions();
     }
 
-    private void renderForeground(GuiGraphicsExtractor graphics) {
+    private void renderForeground(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         tick();
         int statusY = workY + WORK_HEIGHT - STATUS_HEIGHT + 4;
         // The fixed original card slot is deliberately left uncovered. Crop
@@ -425,10 +431,103 @@ final class NovelEditorOverlay {
         graphics.pose().popMatrix();
         renderCardCapacity(graphics);
         renderEditorCharacterCount(graphics);
+        renderEmptyEditorGuide(graphics);
         renderExternalReferences(graphics);
         renderMissingCachedNodeMarkers(graphics);
         renderErrorUnderline(graphics);
+        renderHoveredRootId(graphics, mouseX, mouseY);
         renderPopup(graphics);
+    }
+
+    private void renderEmptyEditorGuide(GuiGraphicsExtractor graphics) {
+        if (!editor.getValue().isEmpty()) {
+            return;
+        }
+        int x = editor.getX() + EDITOR_PADDING;
+        int y = editor.getY() + EDITOR_PADDING;
+        int maxWidth = Math.round((editor.getWidth() - EDITOR_PADDING * 2) / 0.75F);
+        graphics.pose().pushMatrix();
+        graphics.pose().scale(0.75F, 0.75F);
+        for (int line = 1; line <= EMPTY_GUIDE_LINES; line++) {
+            Component shortcut = line == 1 ? IntegratedIdeKeyMappings.COMPILE_NOVEL.getTranslatedKeyMessage()
+                    : line == 2 ? IntegratedIdeKeyMappings.REQUEST_COMPLETION.getTranslatedKeyMessage() : Component.empty();
+            String guide = Component.translatable("integratedide.guide." + line, shortcut).getString();
+            String visible = font.plainSubstrByWidth(guide, maxWidth);
+            graphics.text(font, visible, Math.round(x / 0.75F), Math.round((y + (line - 1) * 8) / 0.75F),
+                    0xFF8A8A8A, false);
+        }
+        graphics.pose().popMatrix();
+    }
+
+    private void renderHoveredRootId(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        if (!insideEditor(mouseX, mouseY) || compilation == null || !compilation.valid()) {
+            return;
+        }
+        String source = editor.getValue();
+        int relativeY = mouseY - editor.getY() - EDITOR_PADDING + (int) editor.scrollAmount();
+        if (relativeY < 0) {
+            return;
+        }
+        int line = relativeY / font.lineHeight;
+        int lineStart = sourceLineStart(source, line);
+        if (lineStart < 0) {
+            return;
+        }
+        int newline = source.indexOf('\n', lineStart);
+        int lineEnd = newline < 0 ? source.length() : newline;
+        ExpressionCompiler.StatementRoot root = compilation.statementRoots().stream()
+                .filter(candidate -> candidate.sourceStart() >= lineStart && candidate.sourceStart() < lineEnd)
+                .findFirst()
+                .orElse(null);
+        if (root == null) {
+            return;
+        }
+        ExpressionCompiler.CardStep rootStep = compilation.steps().stream()
+                .filter(candidate -> candidate.id().equals(root.stepId()))
+                .findFirst()
+                .orElse(null);
+        if (rootStep == null) {
+            return;
+        }
+
+        int id;
+        int color;
+        if (rootStep.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
+            id = Integer.parseInt(rootStep.value());
+            boolean available = CardInventory.findVariableCardById(Minecraft.getInstance().player, id,
+                    rootStep.outputTypeId()) != null;
+            color = available ? 0xFF55AAFF : 0xFFFF5555;
+        } else {
+            NovelCompilationCache.CachedNode cached = previewReconciliation == null ? null
+                    : previewReconciliation.match(root.stepId());
+            if (cached == null || cached.variableCardId < 0) {
+                return;
+            }
+            id = cached.variableCardId;
+            color = 0xFFE0E0E0;
+        }
+
+        TextLocation location = textLocation(lineStart);
+        if (location.y() < editor.getY() || location.y() >= editor.getBottom()) {
+            return;
+        }
+        String label = "{" + id + "}";
+        int x = editor.getX() + 1;
+        int width = font.width(label);
+        graphics.fill(x - 1, location.y() - 1, x + width + 2, location.y() + font.lineHeight + 1, 0xD0101010);
+        graphics.text(font, label, x, location.y(), color, false);
+    }
+
+    private static int sourceLineStart(String source, int line) {
+        int start = 0;
+        for (int current = 0; current < line; current++) {
+            int newline = source.indexOf('\n', start);
+            if (newline < 0) {
+                return -1;
+            }
+            start = newline + 1;
+        }
+        return start;
     }
 
     private void renderCardCapacity(GuiGraphicsExtractor graphics) {
@@ -831,7 +930,7 @@ final class NovelEditorOverlay {
 
         @Override
         protected void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-            renderForeground(graphics);
+            renderForeground(graphics, mouseX, mouseY);
         }
 
         @Override

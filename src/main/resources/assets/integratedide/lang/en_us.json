@@ -4,5 +4,16 @@
   "integratedide.title": "Integrated IDE",
   "integratedide.hint": "Ctrl+Enter: compile and build   Esc: Vanilla mode",
   "integratedide.placeholder": "One line each: {x} = global(args); {x}.member(); $item, @mod, #tag",
-  "integratedide.queue": "Variable-card queue"
+  "integratedide.guide.1": "%s: compile; again rebuilds missing cards.",
+  "integratedide.guide.2": "%s: completion; arrows + Tab.",
+  "integratedide.guide.3": "One expression per line; optional {x} = expr.",
+  "integratedide.guide.4": "Later lines may use {x}; global: fn(args).",
+  "integratedide.guide.5": "Member call: object.fn(args).",
+  "integratedide.guide.6": "Literals: \"text\", 42, true, \"$item\".",
+  "integratedide.guide.7": "Resources: \"@mod\", \"#tag\"; {123} cites a card.",
+  "integratedide.guide.8": "// starts a comment; it is not compiled.",
+  "integratedide.queue": "Variable-card queue",
+  "key.category.integratedide.integrated_ide": "Integrated IDE",
+  "key.integratedide.compile": "Compile Novel script",
+  "key.integratedide.completion": "Request Novel completion"
 }
