@@ -77,6 +77,7 @@ final class CompletionEditorAccess {
     private static boolean isTokenCharacter(char character) {
         return Character.isLetterOrDigit(character) || character == '_' || character == '-' || character == ':'
                 || character == '/' || character == '.' || character == '$' || character == '@' || character == '#'
+                || character == '"'
                 || character == '{' || character == '}';
     }
 

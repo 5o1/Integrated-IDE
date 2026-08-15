@@ -130,14 +130,14 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     public List<Completion> completions(String source, int cursor) {
         String beforeCursor = source.substring(0, Math.max(0, Math.min(cursor, source.length())));
         String token = currentToken(beforeCursor);
-        if (token.startsWith("$")) {
-            return resourceCompletions(token.substring(1));
+        if (token.startsWith("\"$")) {
+            return resourceCompletions(token.substring(2));
         }
-        if (token.startsWith("@")) {
-            return modCompletions(token.substring(1));
+        if (token.startsWith("\"@")) {
+            return modCompletions(token.substring(2));
         }
-        if (token.startsWith("#")) {
-            return tagCompletions(token.substring(1));
+        if (token.startsWith("\"#")) {
+            return tagCompletions(token.substring(2));
         }
         int dot = token.lastIndexOf('.');
         if (dot > 0) {
@@ -211,10 +211,10 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private List<Completion> buildResourceCompletions() {
         List<Completion> results = new ArrayList<>();
         for (Identifier id : BuiltInRegistries.FLUID.keySet()) {
-            results.add(new Completion("$" + id, "fluid"));
+            results.add(new Completion("\"$" + id + "\"", "fluid"));
         }
         for (Identifier id : BuiltInRegistries.ITEM.keySet()) {
-            results.add(new Completion("$" + id, "item"));
+            results.add(new Completion("\"$" + id + "\"", "item"));
         }
         return distinctAndSorted(results);
     }
@@ -222,7 +222,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private List<Completion> buildModCompletions() {
         return ModList.get().getMods().stream()
                 .sorted(Comparator.comparing(mod -> mod.getModId(), String.CASE_INSENSITIVE_ORDER))
-                .map(mod -> new Completion("@" + mod.getModId(), mod.getDisplayName()))
+                .map(mod -> new Completion("\"@" + mod.getModId() + "\"", mod.getDisplayName()))
                 .toList();
     }
 
@@ -232,14 +232,14 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         BuiltInRegistries.FLUID.getTags().forEach(tag -> ids.add(tag.key().location().toString()));
         return ids.stream()
                 .sorted(String.CASE_INSENSITIVE_ORDER)
-                .map(id -> new Completion("#" + id, "item/fluid tag"))
+                .map(id -> new Completion("\"#" + id + "\"", "item/fluid tag"))
                 .toList();
     }
 
     private List<Completion> matching(List<Completion> candidates, String prefix) {
         return candidates.stream()
-                .filter(entry -> startsWithIgnoreCase(entry.insertion().substring(1), prefix)
-                        || (entry.insertion().startsWith("@") && startsWithIgnoreCase(entry.detail(), prefix)))
+                .filter(entry -> startsWithIgnoreCase(resourceId(entry.insertion()), prefix)
+                        || (entry.insertion().startsWith("\"@") && startsWithIgnoreCase(entry.detail(), prefix)))
                 .limit(12)
                 .toList();
     }
@@ -252,6 +252,10 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         return unique.values().stream()
                 .sorted(Comparator.comparing(Completion::insertion, String.CASE_INSENSITIVE_ORDER))
                 .toList();
+    }
+
+    private static String resourceId(String insertion) {
+        return insertion.substring(2, insertion.length() - 1);
     }
 
     private ExpressionCompiler.FunctionInfo describe(IOperator operator, String displayName) {
@@ -306,6 +310,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private static boolean isCompletionCharacter(char character) {
         return Character.isLetterOrDigit(character) || character == '_' || character == '-' || character == ':'
                 || character == '/' || character == '.' || character == '$' || character == '@' || character == '#'
+                || character == '"'
                 || character == '{' || character == '}';
     }
 

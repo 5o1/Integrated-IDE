@@ -38,8 +38,7 @@ final class ExpressionLexer {
                 continue;
             }
             if (character == '$' || character == '@' || character == '#') {
-                cursor = resource(tokens, cursor, character);
-                continue;
+                throw error(cursor, "Resource literals must be wrapped in double quotes, for example \"$minecraft:stone\".");
             }
             if (Character.isDigit(character) || (character == '-' && cursor + 1 < source.length()
                     && Character.isDigit(source.charAt(cursor + 1)))) {
@@ -58,6 +57,11 @@ final class ExpressionLexer {
 
     private int string(List<ExpressionToken> tokens, int cursor) {
         int start = cursor++;
+        char marker = cursor < source.length() ? source.charAt(cursor) : '\0';
+        ExpressionToken.Type type = resourceType(marker);
+        if (type != ExpressionToken.Type.STRING) {
+            cursor++;
+        }
         StringBuilder value = new StringBuilder();
         boolean closed = false;
         while (cursor < source.length()) {
@@ -81,23 +85,27 @@ final class ExpressionLexer {
         if (!closed) {
             throw error(start, "Unterminated string literal.");
         }
-        tokens.add(new ExpressionToken(ExpressionToken.Type.STRING, value.toString(), start));
+        if (type != ExpressionToken.Type.STRING) {
+            if (value.isEmpty()) {
+                throw error(start, "Expected an identifier after '" + marker + "'.");
+            }
+            for (int index = 0; index < value.length(); index++) {
+                if (!isResourceCharacter(value.charAt(index))) {
+                    throw error(start + 2 + index, "Invalid character in resource literal.");
+                }
+            }
+        }
+        tokens.add(new ExpressionToken(type, value.toString(), start));
         return cursor;
     }
 
-    private int resource(List<ExpressionToken> tokens, int cursor, char marker) {
-        int start = cursor++;
-        int valueStart = cursor;
-        while (cursor < source.length() && isResourceCharacter(source.charAt(cursor))) {
-            cursor++;
-        }
-        if (valueStart == cursor) {
-            throw error(start, "Expected an identifier after '" + marker + "'.");
-        }
-        ExpressionToken.Type type = marker == '$' ? ExpressionToken.Type.ITEM
-                : marker == '@' ? ExpressionToken.Type.MOD : ExpressionToken.Type.TAG;
-        tokens.add(new ExpressionToken(type, source.substring(valueStart, cursor), start));
-        return cursor;
+    private static ExpressionToken.Type resourceType(char marker) {
+        return switch (marker) {
+            case '$' -> ExpressionToken.Type.ITEM;
+            case '@' -> ExpressionToken.Type.MOD;
+            case '#' -> ExpressionToken.Type.TAG;
+            default -> ExpressionToken.Type.STRING;
+        };
     }
 
     private int number(List<ExpressionToken> tokens, int cursor) {
@@ -106,7 +114,8 @@ final class ExpressionLexer {
             cursor++;
         }
         boolean decimal = false;
-        if (cursor < source.length() && source.charAt(cursor) == '.') {
+        if (cursor + 1 < source.length() && source.charAt(cursor) == '.'
+                && Character.isDigit(source.charAt(cursor + 1))) {
             decimal = true;
             cursor++;
             while (cursor < source.length() && Character.isDigit(source.charAt(cursor))) {

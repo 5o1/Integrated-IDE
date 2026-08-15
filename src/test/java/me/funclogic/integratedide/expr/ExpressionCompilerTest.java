@@ -35,11 +35,30 @@ class ExpressionCompilerTest {
 
     @Test
     void choosesFluidCardsForFluidIdentifiersAndIngredientCardsForTags() {
-        var compilation = ExpressionCompiler.compile("fluid($minecraft:water)\ningredient(#minecraft:planks)", catalog());
+        var compilation = ExpressionCompiler.compile("fluid(\"$minecraft:water\")\ningredient(\"#minecraft:planks\")", catalog());
 
         assertTrue(compilation.valid(), compilation.message());
         assertTrue(compilation.steps().stream().anyMatch(step -> step.kind() == ExpressionCompiler.StepKind.STATIC_FLUID));
         assertTrue(compilation.steps().stream().anyMatch(step -> step.kind() == ExpressionCompiler.StepKind.STATIC_TAG));
+    }
+
+    @Test
+    void requiresQuotedResourceLiteralsAndAllowsEscapedResourcePrefixesInStrings() {
+        var bare = ExpressionCompiler.compile("fluid($minecraft:water)", catalog());
+        var escaped = ExpressionCompiler.compile("join(\"\\@literal\", \"text\")", catalog());
+
+        assertFalse(bare.valid());
+        assertTrue(bare.message().contains("Resource literals must be wrapped in double quotes."));
+        assertTrue(escaped.valid(), escaped.message());
+        assertEquals("@literal", escaped.steps().getFirst().value());
+        assertEquals(ExpressionCompiler.StepKind.STATIC_TEXT, escaped.steps().getFirst().kind());
+    }
+
+    @Test
+    void treatsDotAfterIntegerAsMemberAccess() {
+        var compilation = ExpressionCompiler.compile("1.empty()", catalog());
+
+        assertTrue(compilation.valid(), compilation.message());
     }
 
     @Test
