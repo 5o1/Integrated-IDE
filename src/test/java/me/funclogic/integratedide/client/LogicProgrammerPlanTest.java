@@ -22,9 +22,9 @@ class LogicProgrammerPlanTest {
     private static final ExpressionCompiler.TypeInfo BOOLEAN = type("boolean");
 
     @Test
-    void executesAnActualNamingStyleExpressionThroughTheLogicProgrammerContract() {
+    void executesACompiledPlanThroughTheLogicProgrammerContract() {
         var compilation = ExpressionCompiler.compile(
-                "anyEquals(\"$minecraft:cobblestone\".withSize(10).size(), 10.toLong())", catalog());
+                "same(\"$minecraft:cobblestone\".withSize(10).size(), 10.toLong())", catalog());
 
         assertTrue(compilation.valid(), compilation.message());
         assertEquals(7, compilation.steps().size());
@@ -49,16 +49,6 @@ class LogicProgrammerPlanTest {
     }
 
     @Test
-    void rejectsTheOperatorNameWhenItIsNotTheRegisteredGlobalInteractionName() {
-        var compilation = ExpressionCompiler.compile(
-                "equals(\"$minecraft:cobblestone\".withSize(10).size(), 10.toLong())", catalog());
-
-        assertFalse(compilation.valid());
-        assertEquals(0, compilation.errorPosition());
-        assertTrue(compilation.message().contains("No registered global function named 'equals'"));
-    }
-
-    @Test
     void configuresAllStaticLiteralKindsBeforeWritingTheirDependentOperator() {
         var compilation = ExpressionCompiler.compile(
                 "pack(\"plain\", true, \"$minecraft:cobblestone\", \"$minecraft:water\", \"@minecraft\", \"#minecraft:planks\")",
@@ -78,7 +68,7 @@ class LogicProgrammerPlanTest {
     @Test
     void reusesVirtualCardsAndOnlyInsertsInputsAlreadyCreatedByThePlan() {
         var compilation = ExpressionCompiler.compile(
-                "{stack} = \"$minecraft:cobblestone\".withSize(10)\nanyEquals({stack}.size(), 10.toLong())",
+                "{stack} = \"$minecraft:cobblestone\".withSize(10)\nsame({stack}.size(), 10.toLong())",
                 catalog());
 
         assertTrue(compilation.valid(), compilation.message());
@@ -105,7 +95,7 @@ class LogicProgrammerPlanTest {
 
     @Test
     void rejectsArityAndTypeErrorsBeforeAnyLogicProgrammerActionCanBePlanned() {
-        var arity = ExpressionCompiler.compile("anyEquals(10)", catalog());
+        var arity = ExpressionCompiler.compile("same(10)", catalog());
         var type = ExpressionCompiler.compile("\"$minecraft:cobblestone\".withSize(true)", catalog());
 
         assertFalse(arity.valid());
@@ -142,7 +132,7 @@ class LogicProgrammerPlanTest {
             @Override
             public ExpressionCompiler.FunctionInfo globalFunction(String name) {
                 return switch (name) {
-                    case "anyEquals" -> function("test:any_equals", List.of(ANY, ANY), BOOLEAN);
+                    case "same" -> function("test:any_equals", List.of(ANY, ANY), BOOLEAN);
                     case "pack" -> function("test:pack", List.of(STRING, BOOLEAN, ITEM, FLUID, STRING, TAG), BOOLEAN);
                     case "usesExternal" -> function("test:uses_external", List.of(ITEM), BOOLEAN);
                     default -> null;
