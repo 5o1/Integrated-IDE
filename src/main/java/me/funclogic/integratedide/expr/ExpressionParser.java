@@ -28,9 +28,11 @@ final class ExpressionParser {
                 String name = expect(ExpressionToken.Type.IDENTIFIER, "Expected a temporary variable name.").text();
                 expect(ExpressionToken.Type.RBRACE, "Expected '}' after temporary variable name.");
                 expect(ExpressionToken.Type.EQUALS, "Expected '=' after temporary variable name.");
-                statements.add(new ExpressionSyntax.Assignment(position, name, parseExpression()));
+                ExpressionSyntax.Expr expression = parseExpression();
+                statements.add(new ExpressionSyntax.Assignment(position, expression.end(), name, expression));
             } else {
-                statements.add(new ExpressionSyntax.ExpressionStatement(position, parseExpression()));
+                ExpressionSyntax.Expr expression = parseExpression();
+                statements.add(new ExpressionSyntax.ExpressionStatement(position, expression.end(), expression));
             }
             if (!check(ExpressionToken.Type.EOF) && !match(ExpressionToken.Type.NEWLINE)) {
                 throw error(current().position(), "Statements must be separated by a newline.");
@@ -43,7 +45,8 @@ final class ExpressionParser {
         ExpressionSyntax.Expr result = parsePrimary();
         while (match(ExpressionToken.Type.DOT)) {
             ExpressionToken name = expect(ExpressionToken.Type.IDENTIFIER, "Expected a member function name after '.'.");
-            result = new ExpressionSyntax.MemberCall(name.position(), result, name.text(), parseArguments());
+            Arguments arguments = parseArguments();
+            result = new ExpressionSyntax.MemberCall(result.position(), arguments.end(), result, name.text(), arguments.values());
         }
         return result;
     }
@@ -66,22 +69,33 @@ final class ExpressionParser {
 
     private ExpressionSyntax.Literal literal(ExpressionToken token, ExpressionCompiler.LiteralKind kind) {
         advance();
-        return new ExpressionSyntax.Literal(token.position(), kind, token.text());
+        return new ExpressionSyntax.Literal(token.position(), current().position(), kind, token.text());
     }
 
-    private ExpressionSyntax.Reference parseReference(ExpressionToken token) {
+    private ExpressionSyntax.Expr parseReference(ExpressionToken token) {
         advance();
-        ExpressionToken name = expect(ExpressionToken.Type.IDENTIFIER, "Expected a temporary variable name.");
+        if (check(ExpressionToken.Type.INTEGER)) {
+            ExpressionToken id = advance();
+            expect(ExpressionToken.Type.RBRACE, "Expected '}' after the Variable Card ID.");
+            try {
+                return new ExpressionSyntax.ExternalReference(token.position(), current().position(),
+                        Integer.parseInt(id.text()));
+            } catch (NumberFormatException error) {
+                throw error(id.position(), "Variable Card IDs must fit in a signed 32-bit integer.");
+            }
+        }
+        ExpressionToken name = expect(ExpressionToken.Type.IDENTIFIER, "Expected a temporary variable name or card ID.");
         expect(ExpressionToken.Type.RBRACE, "Expected '}' after temporary variable name.");
-        return new ExpressionSyntax.Reference(token.position(), name.text());
+        return new ExpressionSyntax.Reference(token.position(), current().position(), name.text());
     }
 
     private ExpressionSyntax.GlobalCall parseGlobalCall(ExpressionToken token) {
         advance();
-        return new ExpressionSyntax.GlobalCall(token.position(), token.text(), parseArguments());
+        Arguments arguments = parseArguments();
+        return new ExpressionSyntax.GlobalCall(token.position(), arguments.end(), token.text(), arguments.values());
     }
 
-    private List<ExpressionSyntax.Expr> parseArguments() {
+    private Arguments parseArguments() {
         expect(ExpressionToken.Type.LPAREN, "Expected '(' after function name.");
         List<ExpressionSyntax.Expr> arguments = new ArrayList<>();
         if (!check(ExpressionToken.Type.RPAREN)) {
@@ -90,7 +104,7 @@ final class ExpressionParser {
             } while (match(ExpressionToken.Type.COMMA));
         }
         expect(ExpressionToken.Type.RPAREN, "Expected ')' after function arguments.");
-        return List.copyOf(arguments);
+        return new Arguments(List.copyOf(arguments), current().position());
     }
 
     private ExpressionToken current() {
@@ -130,5 +144,8 @@ final class ExpressionParser {
 
     private static ExpressionCompileError error(int position, String message) {
         return new ExpressionCompileError(position, message);
+    }
+
+    private record Arguments(List<ExpressionSyntax.Expr> values, int end) {
     }
 }

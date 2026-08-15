@@ -87,6 +87,9 @@ public final class LogicProgrammerScreenHooks {
     }
 
     public static void removeOverlay(ScreenEvent.Closing event) {
-        OVERLAYS.remove(event.getScreen());
+        NovelEditorOverlay overlay = OVERLAYS.remove(event.getScreen());
+        if (overlay != null) {
+            overlay.close();
+        }
     }
 }

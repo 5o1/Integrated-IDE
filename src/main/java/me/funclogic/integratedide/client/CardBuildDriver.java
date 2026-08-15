@@ -27,11 +27,14 @@ public final class CardBuildDriver {
     private int cooldown;
     private Phase phase = Phase.IDLE;
     private ItemStack pendingOutput = ItemStack.EMPTY;
+    private int blankSourceSlot = -1;
     private String status = "等待开始";
 
-    public CardBuildDriver(ContainerLogicProgrammerBase menu, ExpressionCompiler.Compilation compilation) {
+    public CardBuildDriver(ContainerLogicProgrammerBase menu, List<ExpressionCompiler.CardStep> steps,
+                           Map<String, ItemStack> existingCards) {
         this.programmer = new LogicProgrammerGateway(menu);
-        this.steps = compilation.steps();
+        this.steps = List.copyOf(steps);
+        this.produced.putAll(existingCards);
     }
 
     public void start() {
@@ -49,6 +52,14 @@ public final class CardBuildDriver {
 
     public boolean isFailed() {
         return phase == Phase.FAILED;
+    }
+
+    public boolean isComplete() {
+        return phase == Phase.COMPLETE;
+    }
+
+    public Map<String, ItemStack> producedCards() {
+        return Map.copyOf(produced);
     }
 
     public String status() {
@@ -141,11 +152,11 @@ public final class CardBuildDriver {
     }
 
     private void pickBlank(Player player) {
-        int sourceSlot = CardInventory.findBlankVariableSlot(programmer.menu(), player);
-        if (sourceSlot < 0) {
+        blankSourceSlot = CardInventory.findBlankVariableSlot(programmer.menu(), player);
+        if (blankSourceSlot < 0) {
             throw new IllegalStateException("空白 Variable Card 已用尽");
         }
-        programmer.pickup(player, sourceSlot, 0);
+        programmer.pickup(player, blankSourceSlot, 0);
         phase = Phase.PLACE_BLANK;
         delay();
     }
@@ -157,11 +168,13 @@ public final class CardBuildDriver {
     }
 
     private void returnRemainder(Player player) {
-        int sourceSlot = CardInventory.findCompatiblePlayerSlotForCursor(programmer.menu(), player);
-        if (sourceSlot < 0) {
+        if (blankSourceSlot < 0) {
             throw new IllegalStateException("背包没有空间放回变量卡队列");
         }
-        programmer.pickup(player, sourceSlot, 0);
+        // Return the remainder to the exact slot it came from. The former
+        // first-compatible-slot lookup was what reordered blank-card stacks.
+        programmer.pickup(player, blankSourceSlot, 0);
+        blankSourceSlot = -1;
         phase = Phase.WAIT_FOR_OUTPUT;
         cooldown = 8;
     }
@@ -211,10 +224,6 @@ public final class CardBuildDriver {
 
     public static int countBlankVariableCards(Player player) {
         return CardInventory.countBlankVariableCards(player);
-    }
-
-    public static ItemStack blankVariableQueue(Player player, int count) {
-        return CardInventory.blankVariableQueue(player, count);
     }
 
     private void delay() {

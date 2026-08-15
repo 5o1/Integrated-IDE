@@ -7,6 +7,8 @@ import java.util.Map;
 
 /** Lowers a parsed, type-checked expression program to ordinary Variable Card steps. */
 final class ExpressionPlanBuilder {
+    private static final ExpressionCompiler.TypeInfo EXTERNAL_TYPE =
+            new ExpressionCompiler.TypeInfo("integratedide:external", "external Variable Card");
     private final ExpressionCompiler.Catalog catalog;
     private final List<ExpressionCompiler.CardStep> steps = new ArrayList<>();
     private final Map<String, PlanValue> virtualValues = new LinkedHashMap<>();
@@ -19,8 +21,9 @@ final class ExpressionPlanBuilder {
 
     ExpressionCompiler.Compilation compile(ExpressionSyntax.Program program) {
         String root = lower(program);
+        int created = (int) steps.stream().filter(ExpressionCompiler.CardStep::createsVariableCard).count();
         return ExpressionCompiler.Compilation.success(steps, root, virtualTypes,
-                "Valid: " + steps.size() + " Variable Card(s) will be created.");
+                "Valid: " + created + " Variable Card(s) will be created.");
     }
 
     private String lower(ExpressionSyntax.Program program) {
@@ -49,6 +52,7 @@ final class ExpressionPlanBuilder {
         PlanValue value = switch (expression) {
             case ExpressionSyntax.Literal literal -> lowerLiteral(literal, expectedType);
             case ExpressionSyntax.Reference reference -> lowerReference(reference);
+            case ExpressionSyntax.ExternalReference reference -> lowerExternalReference(reference, expectedType);
             case ExpressionSyntax.GlobalCall call -> lowerGlobalCall(call);
             case ExpressionSyntax.MemberCall call -> lowerMemberCall(call);
         };
@@ -74,7 +78,7 @@ final class ExpressionPlanBuilder {
         if (literal.kind() == ExpressionCompiler.LiteralKind.ITEM && type.displayName().equalsIgnoreCase("fluidstack")) {
             kind = ExpressionCompiler.StepKind.STATIC_FLUID;
         }
-        return add(kind, literal.value(), List.of(), type);
+        return add(kind, literal.value(), List.of(), type, literal.position(), literal.end());
     }
 
     private PlanValue lowerReference(ExpressionSyntax.Reference reference) {
@@ -86,12 +90,22 @@ final class ExpressionPlanBuilder {
         return value;
     }
 
+    private PlanValue lowerExternalReference(ExpressionSyntax.ExternalReference reference,
+                                             ExpressionCompiler.TypeInfo expectedType) {
+        if (reference.variableCardId() < 0) {
+            throw new ExpressionCompileError(reference.position(), "Variable Card IDs cannot be negative.");
+        }
+        ExpressionCompiler.TypeInfo type = expectedType == null ? EXTERNAL_TYPE : expectedType;
+        return add(ExpressionCompiler.StepKind.EXTERNAL_REFERENCE, Integer.toString(reference.variableCardId()), List.of(),
+                type, reference.position(), reference.end());
+    }
+
     private PlanValue lowerGlobalCall(ExpressionSyntax.GlobalCall call) {
         ExpressionCompiler.FunctionInfo function = catalog.globalFunction(call.name());
         if (function == null) {
             throw new ExpressionCompileError(call.position(), "No registered global function named '" + call.name() + "'.");
         }
-        return lowerCall(call.position(), function, null, call.arguments());
+        return lowerCall(call.position(), call.end(), function, null, call.arguments());
     }
 
     private PlanValue lowerMemberCall(ExpressionSyntax.MemberCall call) {
@@ -101,10 +115,10 @@ final class ExpressionPlanBuilder {
             throw new ExpressionCompileError(call.position(), "Type " + receiver.type().displayName()
                     + " has no registered member function '" + call.name() + "'.");
         }
-        return lowerCall(call.position(), function, receiver, call.arguments());
+        return lowerCall(call.position(), call.end(), function, receiver, call.arguments());
     }
 
-    private PlanValue lowerCall(int position, ExpressionCompiler.FunctionInfo function, PlanValue receiver,
+    private PlanValue lowerCall(int position, int end, ExpressionCompiler.FunctionInfo function, PlanValue receiver,
                                 List<ExpressionSyntax.Expr> arguments) {
         int supplied = arguments.size() + (receiver == null ? 0 : 1);
         if (supplied < function.requiredInputLength() || supplied > function.inputTypes().size()) {
@@ -124,13 +138,14 @@ final class ExpressionPlanBuilder {
         for (int index = 0; index < arguments.size(); index++) {
             inputs.add(lower(arguments.get(index), function.inputTypes().get(index + offset)).id());
         }
-        return add(ExpressionCompiler.StepKind.DYNAMIC_OPERATOR, function.operatorId(), inputs, function.outputType());
+        return add(ExpressionCompiler.StepKind.DYNAMIC_OPERATOR, function.operatorId(), inputs, function.outputType(),
+                position, end);
     }
 
     private PlanValue add(ExpressionCompiler.StepKind kind, String value, List<String> inputs,
-                          ExpressionCompiler.TypeInfo outputType) {
+                          ExpressionCompiler.TypeInfo outputType, int sourceStart, int sourceEnd) {
         String id = "v" + nextId++;
-        steps.add(new ExpressionCompiler.CardStep(id, kind, value, inputs, outputType.id()));
+        steps.add(new ExpressionCompiler.CardStep(id, kind, value, inputs, outputType.id(), sourceStart, sourceEnd));
         return new PlanValue(id, outputType);
     }
 

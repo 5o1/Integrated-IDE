@@ -19,6 +19,11 @@ public final class RuntimeExpressionValidator {
             return Result.failure(compilation.message());
         }
         for (ExpressionCompiler.CardStep step : compilation.steps()) {
+            if (step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
+                // External cards are validated against the live inventory by
+                // the editor immediately before a build starts.
+                continue;
+            }
             Identifier outputType = Identifier.tryParse(step.outputTypeId());
             if (outputType == null || ValueTypes.REGISTRY.getValueType(outputType) == null) {
                 return Result.failure("The current client no longer registers value type " + step.outputTypeId() + ".");

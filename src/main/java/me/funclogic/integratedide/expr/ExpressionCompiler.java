@@ -56,15 +56,21 @@ public final class ExpressionCompiler {
         }
     }
 
-    /** Every step creates exactly one ordinary, server-recognized Variable Card. */
-    public record CardStep(String id, StepKind kind, String value, List<String> inputs, String outputTypeId) {
+    /** A dependency-graph node; all kinds except external references create a Variable Card. */
+    public record CardStep(String id, StepKind kind, String value, List<String> inputs, String outputTypeId,
+                           int sourceStart, int sourceEnd) {
         public CardStep {
             inputs = List.copyOf(inputs);
+        }
+
+        public boolean createsVariableCard() {
+            return kind != StepKind.EXTERNAL_REFERENCE;
         }
     }
 
     public enum StepKind {
-        STATIC_TEXT, STATIC_MOD, STATIC_BOOLEAN, STATIC_ITEM, STATIC_FLUID, STATIC_TAG, DYNAMIC_OPERATOR
+        STATIC_TEXT, STATIC_MOD, STATIC_BOOLEAN, STATIC_ITEM, STATIC_FLUID, STATIC_TAG, DYNAMIC_OPERATOR,
+        EXTERNAL_REFERENCE
     }
 
     public enum LiteralKind {

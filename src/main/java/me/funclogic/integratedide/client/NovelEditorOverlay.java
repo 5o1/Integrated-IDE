@@ -31,6 +31,7 @@ final class NovelEditorOverlay {
     private static final int STATUS_HEIGHT = 18;
     private static final int EDITOR_PADDING = 4;
     private static final int MAX_COMPLETIONS = 5;
+    private static final int MAX_SOURCE_CHARACTERS = 8_192;
     // This is the original Logic Programmer's write-card slot. Keeping these
     // coordinates makes Novel mode visually continuous with vanilla mode.
     private static final int NATIVE_CARD_SLOT_X = 232;
@@ -46,11 +47,14 @@ final class NovelEditorOverlay {
     private final PanelWidget panel;
     private final ForegroundWidget foreground;
     private final LogicProgrammerCatalog catalog;
+    private final NovelSessionStore.Session session;
     private final boolean completionAvailable;
     private List<LogicProgrammerCatalog.Completion> completions = List.of();
     private LogicProgrammerCatalog.Signature signature;
     private ExpressionCompiler.Compilation compilation;
     private CardBuildDriver driver;
+    private NovelCompilationCache.Reconciliation activeReconciliation;
+    private List<NovelCompilationCache.MissingNode> missingCachedNodes = List.of();
     private String status = "\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210";
     private int selectedCompletion;
     private PopupMode popupMode = PopupMode.NONE;
@@ -58,6 +62,10 @@ final class NovelEditorOverlay {
     private boolean editorFocused;
     private boolean editorDragging;
     private boolean completionExplicitlyRequested;
+    private boolean constrainingSource;
+    private boolean buildCommitted;
+    private int activeCreatedCards;
+    private String rebuildConfirmationSource;
     private final ModeTabWidget modeTab;
 
     NovelEditorOverlay(ContainerScreenLogicProgrammerBase<?> screen, ContainerLogicProgrammerBase menu,
@@ -77,11 +85,12 @@ final class NovelEditorOverlay {
                 .setShowBackground(false)
                 .build(font, WORK_WIDTH - EDITOR_PADDING * 2, WORK_HEIGHT - STATUS_HEIGHT - EDITOR_PADDING * 2,
                         Component.translatable("integratedide.title"));
-        this.editor.setCharacterLimit(8_192);
         this.editor.setLineLimit(128);
         this.catalog = LogicProgrammerCatalog.create();
-        this.editor.setValueListener(ignored -> sourceChanged());
+        this.session = NovelSessionStore.current();
+        this.editor.setValueListener(this::editorValueChanged);
         this.completionAvailable = CompletionEditorAccess.setCursorListener(editor, this::cursorChanged);
+        this.editor.setValue(session.source());
         if (!completionAvailable) {
             this.status = "\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002";
         }
@@ -102,6 +111,10 @@ final class NovelEditorOverlay {
 
     AbstractWidget modeTab() {
         return modeTab;
+    }
+
+    void close() {
+        NovelSessionStore.flush();
     }
 
     void setNovelMode(boolean enabled) {
@@ -252,6 +265,22 @@ final class NovelEditorOverlay {
         }
     }
 
+    private void editorValueChanged(String source) {
+        if (constrainingSource) {
+            return;
+        }
+        if (source.length() > MAX_SOURCE_CHARACTERS) {
+            constrainingSource = true;
+            editor.setValue(source.substring(0, MAX_SOURCE_CHARACTERS));
+            constrainingSource = false;
+            source = editor.getValue();
+        }
+        session.setSource(source);
+        rebuildConfirmationSource = null;
+        missingCachedNodes = List.of();
+        sourceChanged();
+    }
+
     private void sourceChanged() {
         if (!novelMode || (driver != null && driver.isRunning())) {
             return;
@@ -268,9 +297,15 @@ final class NovelEditorOverlay {
     }
 
     private void tick() {
-        if (driver != null) {
+        NovelSessionStore.flushIfDue();
+        if (driver != null && driver.isRunning()) {
             driver.tick();
             status = driver.status();
+        }
+        if (driver != null && driver.isComplete() && !buildCommitted) {
+            session.commit(compilation, activeReconciliation, driver.producedCards());
+            buildCommitted = true;
+            status = "\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002";
         }
     }
 
@@ -288,14 +323,49 @@ final class NovelEditorOverlay {
             status = runtime.message();
             return;
         }
-        int available = CardBuildDriver.countBlankVariableCards(Minecraft.getInstance().player);
-        if (available < compilation.steps().size()) {
-            status = compilation.message() + "\uff1b\u8fd8\u9700 " + (compilation.steps().size() - available)
-                    + " \u5f20\u7a7a\u767d Variable Card\u3002";
+        compileAndBuildFromCache();
+    }
+
+    private void compileAndBuildFromCache() {
+        var player = Minecraft.getInstance().player;
+        activeReconciliation = session.reconcile(compilation);
+        boolean forceRebuild = editor.getValue().equals(rebuildConfirmationSource);
+        NovelCompilationCache.BuildSelection selection = NovelCompilationCache.select(compilation, activeReconciliation,
+                player, forceRebuild);
+        if (selection.hasMissingExternal()) {
+            NovelCompilationCache.MissingNode missing = selection.missingExternal();
+            status = "外部变量卡 {" + missing.variableCardId() + "} 不在背包中，或类型不符合当前参数。";
             return;
         }
-        driver = new CardBuildDriver(menu, compilation);
+        if (selection.needsRebuildConfirmation()) {
+            missingCachedNodes = selection.missingCachedNodes();
+            rebuildConfirmationSource = editor.getValue();
+            status = "缺少 " + missingCachedNodes.size() + " 个缓存变量卡；再次按 Ctrl+Enter 将重编译它们及其依赖者。";
+            return;
+        }
+        missingCachedNodes = List.of();
+        rebuildConfirmationSource = null;
+        int required = selection.stepsToBuild().size();
+        int available = CardBuildDriver.countBlankVariableCards(player);
+        int freeSlots = CardInventory.countEmptyPlayerSlots(player);
+        if (available < required) {
+            status = "空白 Variable Card 不足：需要 " + required + "，背包中有 " + available + "。";
+            return;
+        }
+        if (freeSlots < required) {
+            status = "背包空槽不足：需要 " + required + "，剩余 " + freeSlots + "。";
+            return;
+        }
+        if (required == 0) {
+            session.commit(compilation, activeReconciliation, selection.availableCards());
+            status = "无需新建变量卡，已复用缓存图。";
+            return;
+        }
+        driver = new CardBuildDriver(menu, selection.stepsToBuild(), selection.availableCards());
+        activeCreatedCards = required;
+        buildCommitted = false;
         driver.start();
+        return;
     }
 
     private String validationStatus(ExpressionCompiler.Compilation checked) {
@@ -344,20 +414,127 @@ final class NovelEditorOverlay {
     private void renderForeground(GuiGraphicsExtractor graphics) {
         tick();
         int statusY = workY + WORK_HEIGHT - STATUS_HEIGHT + 4;
-        int available = CardBuildDriver.countBlankVariableCards(Minecraft.getInstance().player);
-        int required = compilation != null && compilation.valid() ? compilation.steps().size() : 0;
-        String queueStatus = "V " + available + "/" + required + "  " + status;
         // The fixed original card slot is deliberately left uncovered. Crop
         // status text before it rather than letting it spill into the slot or
         // the player inventory below.
-        String visibleStatus = font.plainSubstrByWidth(queueStatus,
+        String visibleStatus = font.plainSubstrByWidth(status,
                 Math.round((nativeCardSlotX() - workX - 6) / 0.75F));
         graphics.pose().pushMatrix();
         graphics.pose().scale(0.75F, 0.75F);
         graphics.text(font, visibleStatus, Math.round((workX + 5) / 0.75F), Math.round(statusY / 0.75F), statusColor(), false);
         graphics.pose().popMatrix();
+        renderCardCapacity(graphics);
+        renderEditorCharacterCount(graphics);
+        renderExternalReferences(graphics);
+        renderMissingCachedNodeMarkers(graphics);
         renderErrorUnderline(graphics);
         renderPopup(graphics);
+    }
+
+    private void renderCardCapacity(GuiGraphicsExtractor graphics) {
+        var player = Minecraft.getInstance().player;
+        int required = requiredBlankCards(player);
+        int available = CardBuildDriver.countBlankVariableCards(player);
+        int freeSlots = CardInventory.countEmptyPlayerSlots(player);
+        String capacity = required + "/" + available + "/" + freeSlots;
+        int right = nativeCardSlotX() + CARD_SLOT_SIZE - 1;
+        int bottom = nativeCardSlotY() + CARD_SLOT_SIZE - 1;
+        int x = right - font.width(capacity) - 2;
+        int y = bottom - font.lineHeight - 1;
+        int color = available >= required && freeSlots >= required ? 0xFF9CCF9C : 0xFFE08080;
+        graphics.fill(x - 2, y - 1, right, bottom, 0xD0101010);
+        graphics.text(font, capacity, x, y, color, false);
+    }
+
+    private int requiredBlankCards(net.minecraft.world.entity.player.Player player) {
+        if (compilation == null || !compilation.valid()) {
+            return 0;
+        }
+        NovelCompilationCache.BuildSelection selection = NovelCompilationCache.select(compilation,
+                session.reconcile(compilation), player, true);
+        if (!selection.hasMissingExternal()) {
+            return selection.stepsToBuild().size();
+        }
+        return (int) compilation.steps().stream().filter(ExpressionCompiler.CardStep::createsVariableCard).count();
+    }
+
+    private void renderEditorCharacterCount(GuiGraphicsExtractor graphics) {
+        String counter = editor.getValue().length() + "/" + MAX_SOURCE_CHARACTERS;
+        int x = editor.getRight() - font.width(counter) - 4;
+        int y = editor.getBottom() - font.lineHeight - 3;
+        graphics.text(font, counter, x, y, 0xFFA0A0A0, false);
+    }
+
+    private void renderExternalReferences(GuiGraphicsExtractor graphics) {
+        if (compilation == null || !compilation.valid()) {
+            return;
+        }
+        var player = Minecraft.getInstance().player;
+        for (ExpressionCompiler.CardStep step : compilation.steps()) {
+            if (step.kind() != ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
+                continue;
+            }
+            int id = Integer.parseInt(step.value());
+            boolean available = CardInventory.findVariableCardById(player, id, step.outputTypeId()) != null;
+            renderTextRange(graphics, step.sourceStart(), explicitReferenceEnd(step),
+                    available ? 0xFF55AAFF : 0xFFFF5555);
+        }
+    }
+
+    private int explicitReferenceEnd(ExpressionCompiler.CardStep step) {
+        String source = editor.getValue();
+        int closingBrace = source.indexOf('}', Math.max(0, step.sourceStart()));
+        return closingBrace < 0 ? step.sourceEnd() : closingBrace + 1;
+    }
+
+    private void renderMissingCachedNodeMarkers(GuiGraphicsExtractor graphics) {
+        for (NovelCompilationCache.MissingNode missing : missingCachedNodes) {
+            renderRangeUnderline(graphics, missing.step().sourceStart(), missing.step().sourceEnd(), 0xFFE06060);
+        }
+    }
+
+    private void renderTextRange(GuiGraphicsExtractor graphics, int start, int end, int color) {
+        TextLocation location = textLocation(start);
+        String source = editor.getValue();
+        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
+        int lineEnd = source.indexOf('\n', location.position());
+        if (lineEnd < 0) {
+            lineEnd = source.length();
+        }
+        if (location.y() >= editor.getY() && location.y() < editor.getBottom()
+                && lineEnd >= safeEnd) {
+            graphics.text(font, source.substring(location.position(), safeEnd), location.x(), location.y(), color, false);
+        }
+    }
+
+    private void renderRangeUnderline(GuiGraphicsExtractor graphics, int start, int end, int color) {
+        TextLocation location = textLocation(start);
+        String source = editor.getValue();
+        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
+        int lineEnd = source.indexOf('\n', location.position());
+        if (lineEnd < 0) {
+            lineEnd = source.length();
+        }
+        if (location.y() >= editor.getY() && location.y() < editor.getBottom()) {
+            int width = font.width(source.substring(location.position(), Math.min(safeEnd, lineEnd)));
+            graphics.fill(location.x(), location.y() + font.lineHeight - 1, location.x() + Math.max(3, width),
+                    location.y() + font.lineHeight, color);
+        }
+    }
+
+    private TextLocation textLocation(int position) {
+        String source = editor.getValue();
+        int safePosition = Math.max(0, Math.min(position, source.length()));
+        int lineStart = source.lastIndexOf('\n', safePosition - 1) + 1;
+        int line = 0;
+        for (int index = 0; index < lineStart; index++) {
+            if (source.charAt(index) == '\n') {
+                line++;
+            }
+        }
+        int x = editor.getX() + EDITOR_PADDING + font.width(source.substring(lineStart, safePosition));
+        int y = editor.getY() + EDITOR_PADDING + line * font.lineHeight - (int) editor.scrollAmount();
+        return new TextLocation(safePosition, x, y);
     }
 
     private void renderErrorUnderline(GuiGraphicsExtractor graphics) {
@@ -556,6 +733,9 @@ final class NovelEditorOverlay {
         if (compilation != null && !compilation.valid()) {
             return 0xFFE08080;
         }
+        if (!missingCachedNodes.isEmpty()) {
+            return 0xFFE08080;
+        }
         return 0xFF9CCF9C;
     }
 
@@ -601,9 +781,22 @@ final class NovelEditorOverlay {
         graphics.outline(workX, workY, WORK_WIDTH, WORK_HEIGHT, 0xFF777777);
         graphics.fill(workX + 2, workY + WORK_HEIGHT - STATUS_HEIGHT, slotX - 2,
                 workY + WORK_HEIGHT - STATUS_HEIGHT + 1, 0xFF4A4A4A);
+        renderEditorCharacterCountBackground(graphics);
+    }
+
+    private void renderEditorCharacterCountBackground(GuiGraphicsExtractor graphics) {
+        String counter = editor.getValue().length() + "/" + MAX_SOURCE_CHARACTERS;
+        int right = editor.getRight() - 2;
+        int bottom = editor.getBottom() - 2;
+        int x = right - font.width(counter) - 4;
+        int y = bottom - font.lineHeight - 2;
+        graphics.fill(x - 2, y - 1, right, bottom, 0xD0101010);
     }
 
     private record Popup(int x, int y, int width, int height, List<PopupRow> rows) {
+    }
+
+    private record TextLocation(int position, int x, int y) {
     }
 
     private record PopupRow(int completionIndex, List<PopupLine> lines, int height) {

@@ -73,6 +73,27 @@ class ExpressionCompilerTest {
     }
 
     @Test
+    void modelsNumericBracesAsAnExternalVariableCardReference() {
+        var compilation = ExpressionCompiler.compile("join({42}, \"text\")", catalog());
+
+        assertTrue(compilation.valid(), compilation.message());
+        assertEquals(3, compilation.steps().size());
+        assertEquals(ExpressionCompiler.StepKind.EXTERNAL_REFERENCE, compilation.steps().getFirst().kind());
+        assertEquals("42", compilation.steps().getFirst().value());
+        assertFalse(compilation.steps().getFirst().createsVariableCard());
+        assertEquals(2, compilation.steps().stream().filter(ExpressionCompiler.CardStep::createsVariableCard).count());
+    }
+
+    @Test
+    void acceptsAnExternalVariableCardAsAStandaloneExpression() {
+        var compilation = ExpressionCompiler.compile("{42}", catalog());
+
+        assertTrue(compilation.valid(), compilation.message());
+        assertEquals(1, compilation.steps().size());
+        assertFalse(compilation.steps().getFirst().createsVariableCard());
+    }
+
+    @Test
     void keepsEscapedStringsWhenLexingAndLowering() {
         var compilation = ExpressionCompiler.compile("join(\"first\\nline\", \"second\")", catalog());
 
