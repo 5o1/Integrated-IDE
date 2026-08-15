@@ -135,6 +135,9 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     // The registry regression test loads the exact pinned Dynamic versions,
     // rather than exercising a hand-written test registry.
+    testCompileOnly "maven.modrinth:yYzdQHJI:${integrateddynamics_modrinth_version}"
+    testCompileOnly "maven.modrinth:Z9DM0LJ4:${cyclopscore_modrinth_version}"
+    testCompileOnly "maven.modrinth:oFXrCkDI:${commoncapabilities_modrinth_version}"
     testRuntimeOnly "maven.modrinth:yYzdQHJI:${integrateddynamics_modrinth_version}"
     testRuntimeOnly "maven.modrinth:Z9DM0LJ4:${cyclopscore_modrinth_version}"
     testRuntimeOnly "maven.modrinth:oFXrCkDI:${commoncapabilities_modrinth_version}"
