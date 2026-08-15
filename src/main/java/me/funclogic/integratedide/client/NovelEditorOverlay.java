@@ -366,7 +366,7 @@ final class NovelEditorOverlay {
         }
         String source = editor.getValue();
         int position = Math.min(compilation.errorPosition(), source.length());
-        int lineStart = source.lastIndexOf('\n', Math.max(0, position - 1)) + 1;
+        int lineStart = source.lastIndexOf('\n', position - 1) + 1;
         int line = 0;
         for (int index = 0; index < lineStart; index++) {
             if (source.charAt(index) == '\n') {
