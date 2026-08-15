@@ -48,13 +48,16 @@ final class NovelEditorOverlay {
     private final LogicProgrammerCatalog catalog;
     private final boolean completionAvailable;
     private List<LogicProgrammerCatalog.Completion> completions = List.of();
+    private LogicProgrammerCatalog.Signature signature;
     private ExpressionCompiler.Compilation compilation;
     private CardBuildDriver driver;
     private String status = "\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210";
     private int selectedCompletion;
+    private PopupMode popupMode = PopupMode.NONE;
     private boolean novelMode;
     private boolean editorFocused;
     private boolean editorDragging;
+    private boolean completionExplicitlyRequested;
     private final ModeTabWidget modeTab;
 
     NovelEditorOverlay(ContainerScreenLogicProgrammerBase<?> screen, ContainerLogicProgrammerBase menu,
@@ -78,7 +81,7 @@ final class NovelEditorOverlay {
         this.editor.setLineLimit(128);
         this.catalog = LogicProgrammerCatalog.create();
         this.editor.setValueListener(ignored -> sourceChanged());
-        this.completionAvailable = CompletionEditorAccess.setCursorListener(editor, this::refreshCompletions);
+        this.completionAvailable = CompletionEditorAccess.setCursorListener(editor, this::cursorChanged);
         if (!completionAvailable) {
             this.status = "\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002";
         }
@@ -113,10 +116,11 @@ final class NovelEditorOverlay {
         if (enabled) {
             focusEditor();
             sourceChanged();
-            refreshCompletions();
         } else {
             yieldEditorFocus();
             this.completions = List.of();
+            this.signature = null;
+            this.popupMode = PopupMode.NONE;
         }
     }
 
@@ -140,15 +144,20 @@ final class NovelEditorOverlay {
         if (!novelMode || !editorFocused) {
             return false;
         }
-        if (event.key() == GLFW.GLFW_KEY_TAB && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_SPACE && event.hasControlDown()) {
+            completionExplicitlyRequested = true;
+            refreshCompletions();
+            return true;
+        }
+        if (event.key() == GLFW.GLFW_KEY_TAB && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
             applyCompletion(selectedCompletion);
             return true;
         }
-        if (event.key() == GLFW.GLFW_KEY_DOWN && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_DOWN && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
             selectedCompletion = (selectedCompletion + 1) % completions.size();
             return true;
         }
-        if (event.key() == GLFW.GLFW_KEY_UP && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_UP && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
             selectedCompletion = (selectedCompletion + completions.size() - 1) % completions.size();
             return true;
         }
@@ -247,8 +256,14 @@ final class NovelEditorOverlay {
         if (!novelMode || (driver != null && driver.isRunning())) {
             return;
         }
+        completionExplicitlyRequested = false;
         compilation = catalog.compile(editor.getValue());
         status = validationStatus(compilation);
+        refreshCompletions();
+    }
+
+    private void cursorChanged() {
+        completionExplicitlyRequested = false;
         refreshCompletions();
     }
 
@@ -294,10 +309,23 @@ final class NovelEditorOverlay {
     private void refreshCompletions() {
         if (!novelMode || !completionAvailable) {
             completions = List.of();
+            signature = null;
+            popupMode = PopupMode.NONE;
             return;
         }
-        completions = catalog.completions(editor.getValue(), CompletionEditorAccess.cursor(editor));
-        selectedCompletion = Math.min(selectedCompletion, Math.max(0, completions.size() - 1));
+        String source = editor.getValue();
+        int cursor = CompletionEditorAccess.cursor(editor);
+        signature = catalog.signatureAt(source, cursor);
+        boolean automatic = catalog.hasAutomaticCompletionTrigger(source, cursor);
+        if (completionExplicitlyRequested || automatic) {
+            ExpressionCompiler.TypeInfo expectedType = signature == null ? null : signature.expectedType();
+            completions = catalog.completions(source, cursor, expectedType, completionExplicitlyRequested);
+            selectedCompletion = Math.min(selectedCompletion, Math.max(0, completions.size() - 1));
+            popupMode = PopupMode.COMPLETIONS;
+            return;
+        }
+        completions = List.of();
+        popupMode = signature != null && signature.emptyArgument() ? PopupMode.SIGNATURE : PopupMode.NONE;
     }
 
     private void applyCompletion(int index) {
@@ -306,6 +334,7 @@ final class NovelEditorOverlay {
         }
         if (!CompletionEditorAccess.replaceCurrentToken(editor, completions.get(index).insertion())) {
             completions = List.of();
+            popupMode = PopupMode.NONE;
             status = "\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002";
             return;
         }
@@ -328,7 +357,7 @@ final class NovelEditorOverlay {
         graphics.text(font, visibleStatus, Math.round((workX + 5) / 0.75F), Math.round(statusY / 0.75F), statusColor(), false);
         graphics.pose().popMatrix();
         renderErrorUnderline(graphics);
-        renderCompletionPopup(graphics);
+        renderPopup(graphics);
     }
 
     private void renderErrorUnderline(GuiGraphicsExtractor graphics) {
@@ -351,7 +380,7 @@ final class NovelEditorOverlay {
         }
     }
 
-    private void renderCompletionPopup(GuiGraphicsExtractor graphics) {
+    private void renderPopup(GuiGraphicsExtractor graphics) {
         Popup popup = popup();
         if (popup == null) {
             return;
@@ -360,15 +389,16 @@ final class NovelEditorOverlay {
         graphics.outline(popup.x(), popup.y(), popup.width(), popup.height(), 0xFF777777);
         int rowY = popup.y() + 3;
         for (PopupRow row : popup.rows()) {
-            if (row.completionIndex() == selectedCompletion) {
+            boolean selected = popupMode == PopupMode.COMPLETIONS && row.completionIndex() == selectedCompletion;
+            if (selected) {
                 graphics.fill(popup.x() + 1, rowY - 1, popup.x() + popup.width() - 1, rowY + row.height() - 1,
                         0xFF4A4A4A);
             }
-            int color = row.completionIndex() == selectedCompletion ? 0xFFFFD080 : 0xFFE0E0E0;
             int lineY = rowY;
             for (PopupLine line : row.lines()) {
                 int availableWidth = popup.width() - 8 - line.indent();
                 String visible = font.plainSubstrByWidth(line.text(), Math.max(1, availableWidth));
+                int color = selected || line.active() ? 0xFFFFD080 : 0xFFE0E0E0;
                 graphics.text(font, visible, popup.x() + 4 + line.indent(), lineY, color, false);
                 lineY += completionLineHeight();
             }
@@ -377,7 +407,7 @@ final class NovelEditorOverlay {
     }
 
     private Popup popup() {
-        if (completions.isEmpty()) {
+        if (popupMode == PopupMode.NONE || popupMode == PopupMode.COMPLETIONS && completions.isEmpty()) {
             return null;
         }
         int width = editor.getWidth();
@@ -388,7 +418,8 @@ final class NovelEditorOverlay {
         int beforeCursor = Math.max(caret.lineStart(), Math.min(caret.cursor(), source.length()));
         int anchorY = editor.getY() + EDITOR_PADDING + caret.visualLine() * font.lineHeight
                 - (int) editor.scrollAmount();
-        for (int count = Math.min(MAX_COMPLETIONS, completions.size()); count > 0; count--) {
+        int maximumRows = popupMode == PopupMode.COMPLETIONS ? Math.min(MAX_COMPLETIONS, completions.size()) : 1;
+        for (int count = maximumRows; count > 0; count--) {
             List<PopupRow> rows = popupRows(count);
             int height = 4;
             for (PopupRow row : rows) {
@@ -431,10 +462,14 @@ final class NovelEditorOverlay {
     }
 
     private List<PopupRow> popupRows(int count) {
+        if (popupMode == PopupMode.SIGNATURE && signature != null) {
+            List<PopupLine> lines = signatureLines(signature);
+            return List.of(new PopupRow(-1, lines, lines.size() * completionLineHeight() + 2));
+        }
         List<PopupRow> rows = new java.util.ArrayList<>();
         for (int index = 0; index < count; index++) {
             List<PopupLine> lines = index == 0 ? expandedCompletionLines(completions.get(index))
-                    : List.of(new PopupLine(0, collapsedCompletionText(completions.get(index))));
+                    : List.of(new PopupLine(0, collapsedCompletionText(completions.get(index)), false));
             rows.add(new PopupRow(index, lines, lines.size() * completionLineHeight() + 2));
         }
         return rows;
@@ -442,13 +477,13 @@ final class NovelEditorOverlay {
 
     private List<PopupLine> expandedCompletionLines(LogicProgrammerCatalog.Completion completion) {
         if (completion.function() == null) {
-            return List.of(new PopupLine(0, completion.insertion() + "  " + completion.detail()));
+            return List.of(new PopupLine(0, completion.insertion() + "  " + completion.detail(), false));
         }
         String opening = completion.insertion();
         List<ExpressionCompiler.TypeInfo> inputs = completion.function().inputTypes();
         int firstArgument = Math.min(completion.receiverArguments(), inputs.size());
         if (firstArgument == inputs.size()) {
-            return List.of(new PopupLine(0, opening + ")"));
+            return List.of(new PopupLine(0, opening + ")", false));
         }
         StringBuilder singleLine = new StringBuilder(opening);
         for (int index = firstArgument; index < inputs.size(); index++) {
@@ -459,7 +494,7 @@ final class NovelEditorOverlay {
         }
         singleLine.append(')');
         if (font.width(singleLine.toString()) <= editor.getWidth() - 8) {
-            return List.of(new PopupLine(0, singleLine.toString()));
+            return List.of(new PopupLine(0, singleLine.toString(), false));
         }
         List<PopupLine> lines = new java.util.ArrayList<>();
         int indent = font.width(opening);
@@ -467,7 +502,37 @@ final class NovelEditorOverlay {
             boolean last = index == inputs.size() - 1;
             String argument = inputs.get(index).displayName() + (last ? ")" : ",");
             lines.add(new PopupLine(index == firstArgument ? 0 : indent,
-                    index == firstArgument ? opening + argument : argument));
+                    index == firstArgument ? opening + argument : argument, false));
+        }
+        return lines;
+    }
+
+    private List<PopupLine> signatureLines(LogicProgrammerCatalog.Signature current) {
+        List<ExpressionCompiler.TypeInfo> inputs = current.function().inputTypes();
+        int firstArgument = Math.min(current.receiverArguments(), inputs.size());
+        String opening = current.invocation() + "(";
+        if (firstArgument == inputs.size()) {
+            return List.of(new PopupLine(0, opening + ")", true));
+        }
+        StringBuilder singleLine = new StringBuilder(opening);
+        for (int index = firstArgument; index < inputs.size(); index++) {
+            if (index > firstArgument) {
+                singleLine.append(", ");
+            }
+            singleLine.append(inputs.get(index).displayName());
+        }
+        singleLine.append(')');
+        if (font.width(singleLine.toString()) <= editor.getWidth() - 8) {
+            return List.of(new PopupLine(0, singleLine.toString(), true));
+        }
+        List<PopupLine> lines = new java.util.ArrayList<>();
+        int indent = font.width(opening);
+        int activeInput = firstArgument + current.activeArgument();
+        for (int index = firstArgument; index < inputs.size(); index++) {
+            boolean last = index == inputs.size() - 1;
+            String argument = inputs.get(index).displayName() + (last ? ")" : ",");
+            lines.add(new PopupLine(index == firstArgument ? 0 : indent,
+                    index == firstArgument ? opening + argument : argument, index == activeInput));
         }
         return lines;
     }
@@ -544,7 +609,11 @@ final class NovelEditorOverlay {
     private record PopupRow(int completionIndex, List<PopupLine> lines, int height) {
     }
 
-    private record PopupLine(int indent, String text) {
+    private enum PopupMode {
+        NONE, SIGNATURE, COMPLETIONS
+    }
+
+    private record PopupLine(int indent, String text, boolean active) {
     }
 
     private final class PanelWidget extends AbstractWidget {

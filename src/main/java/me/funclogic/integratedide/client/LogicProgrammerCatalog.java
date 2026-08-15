@@ -1,6 +1,7 @@
 package me.funclogic.integratedide.client;
 
 import me.funclogic.integratedide.expr.ExpressionCompiler;
+import me.funclogic.integratedide.expr.PartialCallAnalysis;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -36,6 +38,15 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                              int receiverArguments) {
         public Completion(String insertion, String detail) {
             this(insertion, detail, null, 0);
+        }
+    }
+
+    /** A callable signature at the cursor in an otherwise incomplete expression. */
+    public record Signature(String invocation, ExpressionCompiler.FunctionInfo function, int receiverArguments,
+                            int activeArgument, boolean emptyArgument) {
+        public ExpressionCompiler.TypeInfo expectedType() {
+            int input = receiverArguments + activeArgument;
+            return input >= 0 && input < function.inputTypes().size() ? function.inputTypes().get(input) : null;
         }
     }
 
@@ -127,17 +138,52 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         return ExpressionCompiler.compile(source, this);
     }
 
-    public List<Completion> completions(String source, int cursor) {
-        String beforeCursor = source.substring(0, Math.max(0, Math.min(cursor, source.length())));
+    public Signature signatureAt(String source, int cursor) {
+        return PartialCallAnalysis.at(source, cursor).map(call -> {
+            ExpressionCompiler.FunctionInfo function;
+            int receiverArguments;
+            String invocation;
+            if (call.receiver() == null) {
+                function = globalFunction(call.name());
+                receiverArguments = 0;
+                invocation = call.name();
+            } else {
+                ExpressionCompiler.TypeInfo receiverType = virtualType(beforeCursor(source, cursor), call.receiver());
+                function = receiverType == null ? null : memberFunction(receiverType, call.name());
+                receiverArguments = 1;
+                invocation = call.receiver() + "." + call.name();
+            }
+            return function == null ? null : new Signature(invocation, function, receiverArguments,
+                    call.argumentIndex(), call.emptyArgument());
+        }).orElse(null);
+    }
+
+    public boolean hasAutomaticCompletionTrigger(String source, int cursor) {
+        String token = currentToken(beforeCursor(source, cursor));
+        if (token.startsWith("\"$") || token.startsWith("\"@") || token.startsWith("\"#")) {
+            return token.length() > 2;
+        }
+        if (token.lastIndexOf('.') > 0) {
+            return true;
+        }
+        return !token.isEmpty() && isIdentifierStart(token.charAt(0));
+    }
+
+    public List<Completion> completions(String source, int cursor, ExpressionCompiler.TypeInfo expectedType,
+                                        boolean explicitlyRequested) {
+        String beforeCursor = beforeCursor(source, cursor);
         String token = currentToken(beforeCursor);
         if (token.startsWith("\"$")) {
-            return resourceCompletions(token.substring(2));
+            String prefix = token.substring(2);
+            return prefix.isEmpty() && !explicitlyRequested ? List.of() : resourceCompletions(prefix, expectedType);
         }
         if (token.startsWith("\"@")) {
-            return modCompletions(token.substring(2));
+            String prefix = token.substring(2);
+            return prefix.isEmpty() && !explicitlyRequested ? List.of() : modCompletions(prefix, expectedType);
         }
         if (token.startsWith("\"#")) {
-            return tagCompletions(token.substring(2));
+            String prefix = token.substring(2);
+            return prefix.isEmpty() && !explicitlyRequested ? List.of() : tagCompletions(prefix, expectedType);
         }
         int dot = token.lastIndexOf('.');
         if (dot > 0) {
@@ -145,10 +191,18 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
             String prefix = token.substring(dot + 1);
             ExpressionCompiler.TypeInfo receiverType = virtualType(beforeCursor, receiver);
             if (receiverType != null) {
-                return memberCompletions(receiverType, prefix, token.substring(0, dot + 1));
+                return memberCompletions(receiverType, prefix, token.substring(0, dot + 1), expectedType);
             }
         }
-        return globalCompletions(token);
+        if (token.isEmpty() && !explicitlyRequested) {
+            return List.of();
+        }
+        return globalCompletions(token, expectedType);
+    }
+
+    private static String beforeCursor(String source, int cursor) {
+        String input = source == null ? "" : source;
+        return input.substring(0, Math.max(0, Math.min(cursor, input.length())));
     }
 
     private ExpressionCompiler.TypeInfo virtualType(String sourceBeforeCursor, String receiver) {
@@ -162,9 +216,10 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         return compilation.valid() ? compilation.virtualTypes().get(name) : null;
     }
 
-    private List<Completion> globalCompletions(String prefix) {
+    private List<Completion> globalCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
         return globals.entrySet().stream()
                 .filter(entry -> startsWithIgnoreCase(entry.getKey(), prefix))
+                .filter(entry -> produces(entry.getValue(), expectedType))
                 .sorted(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER))
                 .limit(12)
                 .map(entry -> new Completion(entry.getKey() + "(", "global · " + entry.getValue().operatorId(),
@@ -172,7 +227,8 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .toList();
     }
 
-    private List<Completion> memberCompletions(ExpressionCompiler.TypeInfo receiver, String prefix, String insertionPrefix) {
+    private List<Completion> memberCompletions(ExpressionCompiler.TypeInfo receiver, String prefix, String insertionPrefix,
+                                               ExpressionCompiler.TypeInfo expectedType) {
         Map<String, ExpressionCompiler.FunctionInfo> candidates = new LinkedHashMap<>();
         Map<String, ExpressionCompiler.FunctionInfo> exact = members.get(receiver.id());
         if (exact != null) {
@@ -189,6 +245,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         }
         return candidates.entrySet().stream()
                 .filter(entry -> startsWithIgnoreCase(entry.getKey(), prefix))
+                .filter(entry -> produces(entry.getValue(), expectedType))
                 .sorted(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER))
                 .limit(12)
                 .map(entry -> new Completion(insertionPrefix + entry.getKey() + "(", "member · "
@@ -196,16 +253,35 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .toList();
     }
 
-    private List<Completion> resourceCompletions(String prefix) {
-        return matching(resourceCompletions, prefix);
+    private List<Completion> resourceCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
+        return matching(resourceCompletions, prefix, entry -> producesResource(entry, expectedType));
     }
 
-    private List<Completion> modCompletions(String prefix) {
-        return matching(modCompletions, prefix);
+    private List<Completion> modCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
+        return matching(modCompletions, prefix,
+                entry -> expectedType == null || produces(typeNamed("string"), expectedType));
     }
 
-    private List<Completion> tagCompletions(String prefix) {
-        return matching(tagCompletions, prefix);
+    private List<Completion> tagCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
+        return matching(tagCompletions, prefix,
+                entry -> expectedType == null || produces(typeNamed("ingredients"), expectedType));
+    }
+
+    private boolean produces(ExpressionCompiler.FunctionInfo function, ExpressionCompiler.TypeInfo expectedType) {
+        return expectedType == null || produces(function.outputType(), expectedType);
+    }
+
+    private boolean producesResource(Completion completion, ExpressionCompiler.TypeInfo expectedType) {
+        if (expectedType == null) {
+            return true;
+        }
+        ExpressionCompiler.TypeInfo actual = completion.detail().equals("fluid") ? typeNamed("fluidstack")
+                : typeNamed("itemstack");
+        return produces(actual, expectedType);
+    }
+
+    private boolean produces(ExpressionCompiler.TypeInfo actual, ExpressionCompiler.TypeInfo expectedType) {
+        return actual != null && isAssignable(actual, expectedType);
     }
 
     private List<Completion> buildResourceCompletions() {
@@ -236,10 +312,11 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .toList();
     }
 
-    private List<Completion> matching(List<Completion> candidates, String prefix) {
+    private List<Completion> matching(List<Completion> candidates, String prefix, Predicate<Completion> allowed) {
         return candidates.stream()
                 .filter(entry -> startsWithIgnoreCase(resourceId(entry.insertion()), prefix)
                         || (entry.insertion().startsWith("\"@") && startsWithIgnoreCase(entry.detail(), prefix)))
+                .filter(allowed)
                 .limit(12)
                 .toList();
     }
@@ -312,6 +389,10 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 || character == '/' || character == '.' || character == '$' || character == '@' || character == '#'
                 || character == '"'
                 || character == '{' || character == '}';
+    }
+
+    private static boolean isIdentifierStart(char character) {
+        return character == '_' || Character.isLetter(character);
     }
 
     private static boolean startsWithIgnoreCase(String value, String prefix) {
