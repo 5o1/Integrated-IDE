@@ -29,7 +29,11 @@ final class NovelEditorOverlay {
     private static final int WORK_Y = 18;
     private static final int WORK_WIDTH = 162;
     private static final int WORK_HEIGHT = 108;
-    private static final int STATUS_HEIGHT = 18;
+    private static final int STATUS_HEIGHT = 32;
+    private static final int STATUS_PADDING = 3;
+    private static final int STATUS_SCROLLBAR_WIDTH = 3;
+    private static final int STATUS_SCROLLBAR_GAP = 2;
+    private static final float STATUS_SCALE = 0.75F;
     private static final int EDITOR_PADDING = 4;
     private static final int MAX_COMPLETIONS = 5;
     private static final int MAX_SOURCE_CHARACTERS = 8_192;
@@ -61,11 +65,13 @@ final class NovelEditorOverlay {
     private NovelCompilationCache.Reconciliation activeReconciliation;
     private List<NovelCompilationCache.MissingNode> missingCachedNodes = List.of();
     private String status = "\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210";
+    private int statusScrollLine;
     private int selectedCompletion;
     private PopupMode popupMode = PopupMode.NONE;
     private boolean novelMode;
     private boolean editorFocused;
     private boolean editorDragging;
+    private boolean statusDragging;
     private boolean completionExplicitlyRequested;
     private boolean constrainingSource;
     private boolean buildCommitted;
@@ -119,6 +125,7 @@ final class NovelEditorOverlay {
     }
 
     void close() {
+        finalizeCompletedBuild();
         NovelSessionStore.flush();
     }
 
@@ -162,7 +169,7 @@ final class NovelEditorOverlay {
         if (!novelMode || !editorFocused) {
             return false;
         }
-        if (IntegratedIdeKeyMappings.REQUEST_COMPLETION.matches(event)) {
+        if (IntegratedIdeKeyMappings.matchesCompletion(event)) {
             completionExplicitlyRequested = true;
             refreshCompletions();
             return true;
@@ -179,7 +186,7 @@ final class NovelEditorOverlay {
             selectedCompletion = (selectedCompletion + completions.size() - 1) % completions.size();
             return true;
         }
-        if (IntegratedIdeKeyMappings.COMPILE_NOVEL.matches(event)) {
+        if (IntegratedIdeKeyMappings.matchesCompile(event)) {
             compileAndBuild();
             return true;
         }
@@ -212,6 +219,13 @@ final class NovelEditorOverlay {
             status = "\u961f\u5217\u4f7f\u7528\u80cc\u5305\u4e2d\u7684\u7a7a\u767d Variable Card\u3002";
             return true;
         }
+        if (insideStatusArea(event.x(), event.y())) {
+            statusDragging = insideStatusScrollBar(event.x(), event.y());
+            if (statusDragging) {
+                updateStatusScroll(event.y());
+            }
+            return true;
+        }
         if (insideEditor(event.x(), event.y())) {
             focusEditor();
             editor.mouseClicked(event, doubleClick);
@@ -226,7 +240,14 @@ final class NovelEditorOverlay {
     }
 
     boolean handleMouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (!novelMode || !editorDragging) {
+        if (!novelMode) {
+            return false;
+        }
+        if (statusDragging) {
+            updateStatusScroll(event.y());
+            return true;
+        }
+        if (!editorDragging) {
             return false;
         }
         editor.mouseDragged(event, dragX, dragY);
@@ -234,7 +255,14 @@ final class NovelEditorOverlay {
     }
 
     boolean handleMouseReleased(MouseButtonEvent event) {
-        if (!novelMode || !editorDragging) {
+        if (!novelMode) {
+            return false;
+        }
+        if (statusDragging) {
+            statusDragging = false;
+            return true;
+        }
+        if (!editorDragging) {
             return false;
         }
         editorDragging = false;
@@ -243,7 +271,14 @@ final class NovelEditorOverlay {
     }
 
     boolean handleMouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (!novelMode || !insideEditor(mouseX, mouseY)) {
+        if (!novelMode) {
+            return false;
+        }
+        if (insideStatusArea(mouseX, mouseY)) {
+            statusScrollLine = clamp(statusScrollLine - (int) Math.signum(scrollY), 0, maxStatusScroll());
+            return true;
+        }
+        if (!insideEditor(mouseX, mouseY)) {
             return false;
         }
         editor.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -308,15 +343,14 @@ final class NovelEditorOverlay {
             driver.tick();
             status = driver.status();
         }
-        if (driver != null && driver.isComplete() && !buildCommitted) {
-            session.commit(compilation, activeReconciliation, driver.producedCards());
-            previewReconciliation = session.reconcile(compilation);
-            buildCommitted = true;
-            status = "\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002";
-        }
+        finalizeCompletedBuild();
     }
 
     private void compileAndBuild() {
+        // A build can finish between screen frames, or just before the user
+        // presses the shortcut again. Commit it before recompiling so the
+        // second invocation can reuse its Variable Cards.
+        finalizeCompletedBuild();
         if (driver != null && driver.isRunning()) {
             return;
         }
@@ -332,6 +366,16 @@ final class NovelEditorOverlay {
             return;
         }
         compileAndBuildFromCache();
+    }
+
+    private void finalizeCompletedBuild() {
+        if (driver == null || !driver.isComplete() || buildCommitted || compilation == null || activeReconciliation == null) {
+            return;
+        }
+        session.commit(compilation, activeReconciliation, driver.producedCards());
+        previewReconciliation = session.reconcile(compilation);
+        buildCommitted = true;
+        status = "\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002";
     }
 
     private void compileAndBuildFromCache() {
@@ -422,16 +466,7 @@ final class NovelEditorOverlay {
 
     private void renderForeground(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         tick();
-        int statusY = workY + WORK_HEIGHT - STATUS_HEIGHT + 4;
-        // The fixed original card slot is deliberately left uncovered. Crop
-        // status text before it rather than letting it spill into the slot or
-        // the player inventory below.
-        String visibleStatus = font.plainSubstrByWidth(status,
-                Math.round((nativeCardSlotX() - workX - 6) / 0.75F));
-        graphics.pose().pushMatrix();
-        graphics.pose().scale(0.75F, 0.75F);
-        graphics.text(font, visibleStatus, Math.round((workX + 5) / 0.75F), Math.round(statusY / 0.75F), statusColor(), false);
-        graphics.pose().popMatrix();
+        renderStatus(graphics);
         renderCardCapacity(graphics);
         renderEmptyEditorGuide(graphics);
         renderExternalReferences(graphics);
@@ -439,6 +474,105 @@ final class NovelEditorOverlay {
         renderErrorUnderline(graphics);
         renderHoveredRootId(graphics, mouseX, mouseY);
         renderPopup(graphics);
+    }
+
+    private void renderStatus(GuiGraphicsExtractor graphics) {
+        List<FormattedCharSequence> lines = statusLines();
+        int visibleLines = visibleStatusLines();
+        statusScrollLine = clamp(statusScrollLine, 0, Math.max(0, lines.size() - visibleLines));
+        int lineHeight = statusLineHeight();
+        graphics.pose().pushMatrix();
+        graphics.pose().scale(STATUS_SCALE, STATUS_SCALE);
+        for (int index = 0; index < visibleLines && statusScrollLine + index < lines.size(); index++) {
+            int x = Math.round(statusLeft() / STATUS_SCALE);
+            int y = Math.round((statusTop() + index * lineHeight) / STATUS_SCALE);
+            graphics.text(font, lines.get(statusScrollLine + index), x, y, statusColor(), false);
+        }
+        graphics.pose().popMatrix();
+        renderStatusScrollBar(graphics, lines.size(), visibleLines);
+    }
+
+    private void renderStatusScrollBar(GuiGraphicsExtractor graphics, int lineCount, int visibleLines) {
+        if (lineCount <= visibleLines) {
+            return;
+        }
+        int x = statusScrollBarX();
+        int top = statusTop();
+        int height = statusBottom() - top;
+        int thumbHeight = statusThumbHeight(lineCount, visibleLines);
+        int range = Math.max(1, height - thumbHeight);
+        int maxScroll = Math.max(1, lineCount - visibleLines);
+        int thumbY = top + Math.round(range * statusScrollLine / (float) maxScroll);
+        graphics.fill(x, top, x + STATUS_SCROLLBAR_WIDTH, statusBottom(), 0xFF333333);
+        graphics.fill(x, thumbY, x + STATUS_SCROLLBAR_WIDTH, thumbY + thumbHeight, 0xFF9A9A9A);
+    }
+
+    private List<FormattedCharSequence> statusLines() {
+        return font.split(Component.literal(status), statusTextWidth());
+    }
+
+    private int maxStatusScroll() {
+        return Math.max(0, statusLines().size() - visibleStatusLines());
+    }
+
+    private int visibleStatusLines() {
+        return Math.max(1, (statusBottom() - statusTop()) / statusLineHeight());
+    }
+
+    private int statusLineHeight() {
+        return Math.max(1, Math.round(font.lineHeight * STATUS_SCALE));
+    }
+
+    private int statusThumbHeight(int lineCount, int visibleLines) {
+        int trackHeight = statusBottom() - statusTop();
+        return Math.max(4, Math.round(trackHeight * visibleLines / (float) Math.max(1, lineCount)));
+    }
+
+    private int statusLeft() {
+        return workX + STATUS_PADDING;
+    }
+
+    private int statusRight() {
+        return nativeCardSlotX() - STATUS_PADDING;
+    }
+
+    private int statusTop() {
+        return workY + WORK_HEIGHT - STATUS_HEIGHT + STATUS_PADDING;
+    }
+
+    private int statusBottom() {
+        return workY + WORK_HEIGHT - STATUS_PADDING;
+    }
+
+    private int statusTextWidth() {
+        return Math.max(1, Math.round((statusScrollBarX() - STATUS_SCROLLBAR_GAP - statusLeft()) / STATUS_SCALE));
+    }
+
+    private int statusScrollBarX() {
+        return statusRight() - STATUS_SCROLLBAR_WIDTH;
+    }
+
+    private boolean insideStatusArea(double mouseX, double mouseY) {
+        return mouseX >= statusLeft() && mouseX < statusRight()
+                && mouseY >= statusTop() && mouseY < statusBottom();
+    }
+
+    private boolean insideStatusScrollBar(double mouseX, double mouseY) {
+        return mouseX >= statusScrollBarX() && mouseX < statusRight()
+                && mouseY >= statusTop() && mouseY < statusBottom();
+    }
+
+    private void updateStatusScroll(double mouseY) {
+        int maxScroll = maxStatusScroll();
+        if (maxScroll == 0) {
+            statusScrollLine = 0;
+            return;
+        }
+        int lineCount = statusLines().size();
+        int thumbHeight = statusThumbHeight(lineCount, visibleStatusLines());
+        int range = Math.max(1, statusBottom() - statusTop() - thumbHeight);
+        double top = mouseY - statusTop() - thumbHeight / 2D;
+        statusScrollLine = clamp((int) Math.round(top * maxScroll / range), 0, maxScroll);
     }
 
     private void renderEmptyEditorGuide(GuiGraphicsExtractor graphics) {
@@ -893,8 +1027,9 @@ final class NovelEditorOverlay {
         graphics.fill(slotX + CARD_SLOT_SIZE, slotY, panelRight, panelBottom, 0xFF161616);
         graphics.fill(slotX, slotY + CARD_SLOT_SIZE, panelRight, panelBottom, 0xFF161616);
         graphics.outline(workX, workY, WORK_WIDTH, WORK_HEIGHT, 0xFF777777);
-        graphics.fill(workX + 2, workY + WORK_HEIGHT - STATUS_HEIGHT, slotX - 2,
-                workY + WORK_HEIGHT - STATUS_HEIGHT + 1, 0xFF4A4A4A);
+        graphics.fill(statusLeft() - 2, statusTop() - 2, statusRight() + 2, statusBottom() + 2, 0xD0101010);
+        graphics.outline(statusLeft() - 2, statusTop() - 2, statusRight() - statusLeft() + 4,
+                statusBottom() - statusTop() + 4, 0xFF4A4A4A);
         renderEditorCharacterCountBackground(graphics);
         // Draw the label before the editor's widget render. Its dark backing
         // and text are deliberately behind user input, so typing in the lower

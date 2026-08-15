@@ -2,6 +2,7 @@ package me.funclogic.integratedide.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import me.funclogic.integratedide.IntegratedIde;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -27,5 +28,13 @@ public final class IntegratedIdeKeyMappings {
         event.registerCategory(CATEGORY);
         event.register(COMPILE_NOVEL);
         event.register(REQUEST_COMPLETION);
+    }
+
+    static boolean matchesCompile(KeyEvent event) {
+        return event.hasControlDown() && COMPILE_NOVEL.matches(event);
+    }
+
+    static boolean matchesCompletion(KeyEvent event) {
+        return event.hasControlDown() && REQUEST_COMPLETION.matches(event);
     }
 }
