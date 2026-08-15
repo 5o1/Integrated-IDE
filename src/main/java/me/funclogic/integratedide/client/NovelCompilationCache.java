@@ -39,6 +39,17 @@ final class NovelCompilationCache {
 
     static BuildSelection select(ExpressionCompiler.Compilation compilation, Reconciliation reconciliation,
                                  Player player, boolean forceRebuildMissingCards) {
+        return select(compilation, reconciliation,
+                (id, typeId) -> CardInventory.findVariableCardById(player, id, typeId), forceRebuildMissingCards);
+    }
+
+    /**
+     * Builds a plan against a variable-card lookup. Keeping the lookup at the
+     * boundary lets the production code use the real inventory while tests
+     * exercise exactly the same cache and rebuild decisions.
+     */
+    static BuildSelection select(ExpressionCompiler.Compilation compilation, Reconciliation reconciliation,
+                                 VariableCardLookup lookup, boolean forceRebuildMissingCards) {
         Map<String, ItemStack> available = new HashMap<>();
         List<MissingNode> missingCachedNodes = new ArrayList<>();
         Set<String> rebuilt = new HashSet<>();
@@ -46,7 +57,7 @@ final class NovelCompilationCache {
         for (ExpressionCompiler.CardStep step : compilation.steps()) {
             if (step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
                 int id = Integer.parseInt(step.value());
-                ItemStack external = CardInventory.findVariableCardById(player, id, step.outputTypeId());
+                ItemStack external = lookup.find(id, step.outputTypeId());
                 if (external == null) {
                     return BuildSelection.missingExternal(step, id);
                 }
@@ -58,7 +69,7 @@ final class NovelCompilationCache {
                 rebuilt.add(step.id());
                 continue;
             }
-            ItemStack card = CardInventory.findVariableCardById(player, cached.variableCardId, step.outputTypeId());
+            ItemStack card = lookup.find(cached.variableCardId, step.outputTypeId());
             if (card == null) {
                 missingCachedNodes.add(new MissingNode(step, cached.variableCardId));
             } else {
@@ -84,14 +95,29 @@ final class NovelCompilationCache {
 
     static List<CachedNode> snapshot(ExpressionCompiler.Compilation compilation, Reconciliation reconciliation,
                                      Map<String, ItemStack> cards) {
+        Map<String, Integer> ids = new HashMap<>();
+        for (ExpressionCompiler.CardStep step : compilation.steps()) {
+            if (step.kind() != ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
+                ids.put(step.id(), CardInventory.variableCardId(cards.get(step.id())));
+            }
+        }
+        return snapshotWithCardIds(compilation, reconciliation, ids);
+    }
+
+    /**
+     * Converts a completed dependency graph to durable cache nodes. The live
+     * caller obtains IDs from Variable Card stacks; the overload makes those
+     * persistence rules testable without fabricating an NBT-backed card.
+     */
+    static List<CachedNode> snapshotWithCardIds(ExpressionCompiler.Compilation compilation,
+                                                 Reconciliation reconciliation, Map<String, Integer> cardIds) {
         List<CachedNode> snapshot = new ArrayList<>();
         for (ExpressionCompiler.CardStep step : compilation.steps()) {
             int id;
             if (step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
                 id = Integer.parseInt(step.value());
             } else {
-                ItemStack card = cards.get(step.id());
-                id = CardInventory.variableCardId(card);
+                id = cardIds.getOrDefault(step.id(), -1);
             }
             List<String> inputFingerprints = step.inputs().stream()
                     .map(reconciliation::fingerprint)
@@ -167,6 +193,11 @@ final class NovelCompilationCache {
     }
 
     record MissingNode(ExpressionCompiler.CardStep step, int variableCardId) {
+    }
+
+    @FunctionalInterface
+    interface VariableCardLookup {
+        ItemStack find(int variableCardId, String expectedTypeId);
     }
 
     record BuildSelection(Map<String, ItemStack> availableCards, List<ExpressionCompiler.CardStep> stepsToBuild,
