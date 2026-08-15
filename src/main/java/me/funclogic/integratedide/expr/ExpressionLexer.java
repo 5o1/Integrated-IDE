@@ -38,7 +38,7 @@ final class ExpressionLexer {
                 continue;
             }
             if (character == '$' || character == '@' || character == '#') {
-                throw error(cursor, "Resource literals must be wrapped in double quotes, for example \"$minecraft:stone\".");
+                throw error(cursor, "Resource literals must be wrapped in double quotes. For example: \"$minecraft:stone\".");
             }
             if (Character.isDigit(character) || (character == '-' && cursor + 1 < source.length()
                     && Character.isDigit(source.charAt(cursor + 1)))) {
