@@ -20,6 +20,11 @@ public final class ExpressionCompiler {
     public interface Catalog {
         FunctionInfo globalFunction(String name);
 
+        /** Optional explanation when a member-only name was used as a global call. */
+        default String missingGlobalFunctionHint(String name) {
+            return null;
+        }
+
         FunctionInfo memberFunction(TypeInfo receiverType, String name);
 
         TypeInfo literalType(LiteralKind kind, String value, TypeInfo expectedType);

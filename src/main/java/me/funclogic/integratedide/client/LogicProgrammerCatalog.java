@@ -54,6 +54,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private final Map<String, ExpressionCompiler.TypeInfo> typesById = new LinkedHashMap<>();
     private final Map<String, ExpressionCompiler.TypeInfo> typesByName = new LinkedHashMap<>();
     private final Map<String, ExpressionCompiler.FunctionInfo> globals = new LinkedHashMap<>();
+    private final Map<String, List<String>> globalFormsByMemberName = new LinkedHashMap<>();
     private final Map<String, Map<String, ExpressionCompiler.FunctionInfo>> members = new LinkedHashMap<>();
     private final List<Completion> resourceCompletions;
     private final List<Completion> modCompletions;
@@ -68,8 +69,15 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
             typesByName.putIfAbsent(type.getTypeName().toLowerCase(Locale.ROOT), info);
         }
         for (Map.Entry<String, IOperator> entry : Operators.REGISTRY.getGlobalInteractOperators().entrySet()) {
-            globals.put(entry.getKey(), describe(entry.getValue(), entry.getKey()));
+            IOperator operator = entry.getValue();
+            globals.put(entry.getKey(), describe(operator, entry.getKey()));
+            String memberName = operator.getScopedInteractName();
+            if (!entry.getKey().equals(memberName)) {
+                globalFormsByMemberName.computeIfAbsent(memberName, ignored -> new ArrayList<>()).add(entry.getKey());
+            }
         }
+        globalFormsByMemberName.replaceAll((ignored, names) -> names.stream().distinct()
+                .sorted(String.CASE_INSENSITIVE_ORDER).toList());
         for (Map.Entry<IValueType<?>, Map<String, IOperator>> entry : Operators.REGISTRY.getScopedInteractOperators().entrySet()) {
             String receiverId = entry.getKey().getUniqueName().toString();
             Map<String, ExpressionCompiler.FunctionInfo> functions = members.computeIfAbsent(receiverId,
@@ -90,6 +98,19 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     @Override
     public ExpressionCompiler.FunctionInfo globalFunction(String name) {
         return globals.get(name);
+    }
+
+    @Override
+    public String missingGlobalFunctionHint(String name) {
+        List<String> globalForms = globalFormsByMemberName.get(name);
+        if (globalForms == null || globalForms.isEmpty()) {
+            return null;
+        }
+        String rendered = String.join(", ", globalForms.stream()
+                .map(candidate -> candidate + "(...)")
+                .toList());
+        return "'" + name + "' is a member function name; use " + rendered
+                + " for the global form, or <object>." + name + "(...).";
     }
 
     @Override

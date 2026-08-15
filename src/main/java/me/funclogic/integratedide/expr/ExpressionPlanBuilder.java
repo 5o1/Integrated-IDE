@@ -107,7 +107,9 @@ final class ExpressionPlanBuilder {
     private PlanValue lowerGlobalCall(ExpressionSyntax.GlobalCall call) {
         ExpressionCompiler.FunctionInfo function = catalog.globalFunction(call.name());
         if (function == null) {
-            throw new ExpressionCompileError(call.position(), "No registered global function named '" + call.name() + "'.");
+            String hint = catalog.missingGlobalFunctionHint(call.name());
+            throw new ExpressionCompileError(call.position(), "No registered global function named '" + call.name()
+                    + "'." + (hint == null ? "" : " " + hint));
         }
         return lowerCall(call.position(), call.end(), function, null, call.arguments());
     }
