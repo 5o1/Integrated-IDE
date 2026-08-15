@@ -128,6 +128,9 @@ neoForge {
 // "optional", meaning it will not be pulled by dependents of this mod.
 configurations {
     runtimeClasspath.extendsFrom localRuntime
+    // FML-backed JUnit must also discover optional runtime mods such as
+    // Integrated Dynamics; otherwise its real operator registry is absent.
+    testRuntimeClasspath.extendsFrom localRuntime
 }
 
 dependencies {
