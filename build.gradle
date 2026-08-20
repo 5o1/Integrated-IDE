@@ -49,8 +49,6 @@ repositories {
 // JUnit worker or the release JAR.
 sourceSets {
     integrationTest {
-        java.srcDir('src/integrationTest/java')
-        resources.srcDir('src/integrationTest/resources')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
