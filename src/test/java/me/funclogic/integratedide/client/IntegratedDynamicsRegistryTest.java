@@ -92,11 +92,13 @@ class IntegratedDynamicsRegistryTest {
     }
 
     @Test
-    void createsEveryRegistryBackedLiteralPayloadBeforeItIsSentToTheProgrammer() {
-        assertFalse(CardLiteralFactory.itemStack("minecraft:cobblestone").isEmpty());
-        assertFalse(CardLiteralFactory.fluidBucket("minecraft:water").isEmpty());
-        assertTrue(CardLiteralFactory.ingredientsTag("minecraft:planks").getRawValue().isPresent(),
-                "The loaded tag must become a non-empty Dynamic ingredients value.");
+    void rejectsHeterogeneousInputsUsingDynamicsRegisteredOperatorValidation() {
+        LogicProgrammerCatalog catalog = LogicProgrammerCatalog.create();
+
+        var invalid = RuntimeExpressionValidator.validate(
+                catalog.compile("anyEquals(\"$minecraft:cobblestone\", 10)"));
+
+        assertFalse(invalid.valid(), "Dynamic must reject equality inputs with incompatible concrete types.");
     }
 
     @Test

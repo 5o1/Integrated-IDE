@@ -13,6 +13,7 @@ import me.funclogic.integratedide.client.CardBuildPort;
 import me.funclogic.integratedide.client.CardLiteralFactory;
 import me.funclogic.integratedide.client.LogicProgrammerCatalog;
 import me.funclogic.integratedide.client.LogicProgrammerMenuLayout;
+import me.funclogic.integratedide.client.RuntimeExpressionValidator;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -214,7 +215,18 @@ class CardBuildWorkflowTest {
         int externalId = variableCardId(source.port.level, external);
         assertTrue(externalId >= 0, "The source item card did not receive a Dynamic ID.");
 
-        String expression = "anyEquals({" + externalId + "}, 10)";
+        String rejectedExpression = "anyEquals({" + externalId + "}, 10)";
+        ExpressionCompiler.Compilation rejected = LogicProgrammerCatalog.create().compile(rejectedExpression);
+        assertTrue(rejected.valid(), rejected.message());
+        ExpressionCompiler.CardStep rejectedExternal = rejected.steps().stream()
+                .filter(step -> step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("The rejected external syntax was not lowered."));
+        assertFalse(RuntimeExpressionValidator.validateSelectedInputs(rejected,
+                Map.of(rejectedExternal.id(), external.copy())).valid(),
+                "The preflight must reject a real item card paired with a number before the programmer opens.");
+
+        String expression = "anyEquals({" + externalId + "}, \"$minecraft:cobblestone\")";
         ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(expression);
         assertTrue(compilation.valid(), compilation.message());
         ExpressionCompiler.CardStep externalStep = compilation.steps().stream()

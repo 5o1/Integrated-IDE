@@ -75,6 +75,12 @@ final class CardInventory {
         return facade != null && facade.isValid() ? facade.getId() : -1;
     }
 
+    /** Returns the live Dynamic output type carried by a valid Variable Card. */
+    static IValueType<?> variableCardOutputType(ItemStack stack) {
+        IVariableFacade facade = variableFacade(stack);
+        return facade != null && facade.isValid() ? facade.getOutputType() : null;
+    }
+
     static int countBlankVariableCards(Player player) {
         if (player == null) {
             return 0;

@@ -1,11 +1,17 @@
 package me.funclogic.integratedide.client;
 
+import java.util.HashMap;
+import java.util.Map;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.neoforged.fml.ModList;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import org.cyclops.integrateddynamics.api.evaluate.operator.IOperator;
+import org.cyclops.integrateddynamics.api.evaluate.variable.IValueType;
 import org.cyclops.integrateddynamics.core.evaluate.operator.Operators;
 import org.cyclops.integrateddynamics.core.evaluate.variable.ValueTypes;
 
@@ -72,7 +78,60 @@ public final class RuntimeExpressionValidator {
                 }
             }
         }
-        return Result.success("Live registry check passed.");
+        return validateOperatorInputTypes(compilation, Map.of());
+    }
+
+    /**
+     * Revalidates Dynamic operator constraints after cache and external-card
+     * lookup. A numeric {@code {id}} has no static output type, whereas its
+     * actual inventory card does; this is the earliest point at which Dynamic
+     * can reject heterogeneous generic inputs before any GUI action is sent.
+     */
+    public static Result validateSelectedInputs(ExpressionCompiler.Compilation compilation,
+                                                Map<String, ItemStack> availableCards) {
+        Result registry = validate(compilation);
+        if (!registry.valid()) {
+            return registry;
+        }
+        return validateOperatorInputTypes(compilation, availableCards);
+    }
+
+    private static Result validateOperatorInputTypes(ExpressionCompiler.Compilation compilation,
+                                                     Map<String, ItemStack> availableCards) {
+        Map<String, IValueType<?>> producedTypes = new HashMap<>();
+        for (ExpressionCompiler.CardStep step : compilation.steps()) {
+            if (step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
+                ItemStack card = availableCards.get(step.id());
+                producedTypes.put(step.id(), card == null ? null : CardInventory.variableCardOutputType(card));
+                continue;
+            }
+            Identifier outputTypeId = Identifier.tryParse(step.outputTypeId());
+            IValueType<?> outputType = outputTypeId == null ? null : ValueTypes.REGISTRY.getValueType(outputTypeId);
+            if (outputType == null) {
+                return Result.failure("The current client no longer registers value type " + step.outputTypeId() + ".");
+            }
+            if (step.kind() == ExpressionCompiler.StepKind.DYNAMIC_OPERATOR) {
+                Identifier operatorId = Identifier.tryParse(step.value());
+                IOperator operator = operatorId == null ? null : Operators.REGISTRY.getOperator(operatorId);
+                if (operator == null) {
+                    return Result.failure("The current client no longer registers operator " + step.value() + ".");
+                }
+                IValueType<?>[] inputs = new IValueType<?>[step.inputs().size()];
+                boolean hasUnknownInput = false;
+                for (int index = 0; index < inputs.length; index++) {
+                    inputs[index] = producedTypes.get(step.inputs().get(index));
+                    hasUnknownInput |= inputs[index] == null;
+                }
+                if (!hasUnknownInput) {
+                    Component error = operator.validateTypes(inputs);
+                    if (error != null) {
+                        return Result.failure(error.getString());
+                    }
+                }
+            }
+            producedTypes.put(step.id(), outputType);
+        }
+        return Result.success("Live registry and Dynamic operator checks passed.");
     }
 
     public record Result(boolean valid, String message) {

@@ -415,6 +415,12 @@ final class NovelEditorOverlay {
             setError(Component.translatable("integratedide.error.missing_external", missing.variableCardId()));
             return;
         }
+        RuntimeExpressionValidator.Result selectedInputValidation = RuntimeExpressionValidator.validateSelectedInputs(
+                compilation, selection.availableCards());
+        if (!selectedInputValidation.valid()) {
+            setDiagnostic(NovelDiagnostic.runtime(compilation, selectedInputValidation));
+            return;
+        }
         if (selection.needsRebuildConfirmation()) {
             missingCachedNodes = selection.missingCachedNodes();
             rebuildConfirmationSource = editor.getValue();
