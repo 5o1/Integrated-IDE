@@ -30,8 +30,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build and test
-        run: ./gradlew clean build --no-daemon --stacktrace
+      - name: Build, unit test, and run real menu integration tests
+        run: ./gradlew clean build runIntegrationTestServer --no-daemon --stacktrace
 
       - name: Upload installable mod JAR
         uses: actions/upload-artifact@v6

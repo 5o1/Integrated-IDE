@@ -1,16 +1,12 @@
 package me.funclogic.integratedide.client;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import com.mojang.authlib.GameProfile;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.resources.Identifier;
@@ -21,7 +17,6 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.common.util.FakePlayerFactory;
-import net.neoforged.testframework.junit.EphemeralTestServerProvider;
 import org.cyclops.integrateddynamics.RegistryEntries;
 import org.cyclops.integrateddynamics.api.evaluate.operator.IOperator;
 import org.cyclops.integrateddynamics.api.evaluate.variable.IValueType;
@@ -39,8 +34,6 @@ import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeBoo
 import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeIngredientsValueChangedPacket;
 import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeSlottedValueChangedPacket;
 import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeStringValueChangedPacket;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * End-to-end materialization tests. The test port deliberately owns no
@@ -48,13 +41,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * packet handler or {@link ContainerLogicProgrammerBase#clicked}, then the
  * driver can advance only after an explicit snapshot of that server menu.
  */
-@ExtendWith(EphemeralTestServerProvider.class)
 class CardBuildWorkflowTest {
     private static final String USER_EXPRESSION =
             "anyEquals(\"$minecraft:cobblestone\".withSize(10).size(), 10)";
 
-    @Test
-    void materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(MinecraftServer server) {
+    static void verify(MinecraftServer server) {
+        materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(server);
+        materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(server);
+        materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server);
+        reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(server);
+        remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(server);
+        stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(server);
+    }
+
+    private static void materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(MinecraftServer server) {
         BuildRun run = start(server, USER_EXPRESSION, 12);
 
         drainAfterEveryServerSnapshot(run);
@@ -70,8 +70,7 @@ class CardBuildWorkflowTest {
                 "Step " + step + " did not result in a valid Variable Card."));
     }
 
-    @Test
-    void materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(MinecraftServer server) {
+    private static void materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(MinecraftServer server) {
         BuildRun run = start(server, "anyConstant(1, 1)", 3);
 
         drainAfterEveryServerSnapshot(run);
@@ -81,8 +80,7 @@ class CardBuildWorkflowTest {
         assertEquals(3, run.port.validCardsInPlayerInventory());
     }
 
-    @Test
-    void materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(MinecraftServer server) {
+    private static void materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(MinecraftServer server) {
         BuildRun run = startWithSeparateBlankStacks(server, "anyConstant(1, 1)", 3);
 
         drainAfterEveryServerSnapshot(run);
@@ -91,8 +89,7 @@ class CardBuildWorkflowTest {
         assertEquals(List.of("v0", "v1", "v2"), run.port.confirmedStepIds);
     }
 
-    @Test
-    void reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(MinecraftServer server) {
+    private static void reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(MinecraftServer server) {
         BuildRun run = start(server, "{stack} = \"$minecraft:cobblestone\".withSize(10)\n"
                 + "anyEquals({stack}.size(), 10)", 12);
 
@@ -103,8 +100,7 @@ class CardBuildWorkflowTest {
         assertEquals(run.compilation.steps().size(), run.port.validCardsInPlayerInventory());
     }
 
-    @Test
-    void remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(MinecraftServer server) {
+    private static void remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(MinecraftServer server) {
         BuildRun run = start(server, "anyConstant(1, 1)", 3);
 
         advanceUntilFirstOutputReturnIsSent(run);
@@ -121,8 +117,7 @@ class CardBuildWorkflowTest {
         assertTrue(run.driver.isComplete(), run.driver.status());
     }
 
-    @Test
-    void stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(MinecraftServer server) {
+    private static void stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(MinecraftServer server) {
         BuildRun run = start(server, "anyConstant(1, 1)", 2);
 
         drainAfterEveryServerSnapshot(run);
@@ -554,5 +549,39 @@ class CardBuildWorkflowTest {
 
     private static boolean sameStack(ItemStack left, ItemStack right) {
         return left.getCount() == right.getCount() && ItemStack.isSameItemSameComponents(left, right);
+    }
+
+    private static void assertTrue(boolean condition) {
+        assertTrue(condition, "Expected condition to be true.");
+    }
+
+    private static void assertTrue(boolean condition, String message) {
+        if (!condition) {
+            throw new AssertionError(message);
+        }
+    }
+
+    private static void assertFalse(boolean condition) {
+        assertFalse(condition, "Expected condition to be false.");
+    }
+
+    private static void assertFalse(boolean condition, String message) {
+        assertTrue(!condition, message);
+    }
+
+    private static void assertEquals(Object expected, Object actual) {
+        assertEquals(expected, actual, "Expected values to be equal.");
+    }
+
+    private static void assertEquals(Object expected, Object actual, String message) {
+        if (!Objects.equals(expected, actual)) {
+            throw new AssertionError(message + " Expected <" + expected + "> but was <" + actual + ">.");
+        }
+    }
+
+    private static void assertNotNull(Object value, String message) {
+        if (value == null) {
+            throw new AssertionError(message);
+        }
     }
 }
