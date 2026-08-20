@@ -137,11 +137,11 @@ public final class CardBuildDriver {
             case WAIT_OUTPUT_READY -> waitForOutputReady();
             case RETURN_REMAINDER -> returnRemainder();
             case WAIT_REMAINDER_RETURNED -> waitForRemainderReturned();
-            case STORE_OUTPUT -> storeOutput();
-            case WAIT_OUTPUT_STORED -> waitForOutputStored();
-            case CONFIRM_OUTPUT -> confirmOutput(step);
             case CLEANUP_INPUT -> cleanupInput(step);
             case WAIT_INPUT_RETURNED -> waitForInputReturned(step);
+            case RETURN_OUTPUT -> returnOutput();
+            case WAIT_OUTPUT_RETURNED -> waitForOutputReturned();
+            case CONFIRM_OUTPUT -> confirmOutput(step);
             default -> throw new IllegalStateException("Unknown card-build phase: " + phase);
         };
     }
@@ -242,18 +242,21 @@ public final class CardBuildDriver {
         if (!port.blankRemainderReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.remainder"));
         }
-        phase = Phase.STORE_OUTPUT;
+        // The dedicated reset packet clears the active element, so all
+        // temporary operator inputs must be returned before it is sent.
+        inputIndex = 0;
+        phase = Phase.CLEANUP_INPUT;
         return true;
     }
 
-    private boolean storeOutput() {
-        port.storeOutput();
-        phase = Phase.WAIT_OUTPUT_STORED;
+    private boolean returnOutput() {
+        port.returnOutput();
+        phase = Phase.WAIT_OUTPUT_RETURNED;
         return false;
     }
 
-    private boolean waitForOutputStored() {
-        if (!port.outputStored()) {
+    private boolean waitForOutputReturned() {
+        if (!port.outputReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.output_stored"));
         }
         phase = Phase.CONFIRM_OUTPUT;
@@ -262,16 +265,15 @@ public final class CardBuildDriver {
 
     private boolean confirmOutput(ExpressionCompiler.CardStep step) {
         port.confirmOutput(step.id());
-        inputIndex = 0;
-        phase = Phase.CLEANUP_INPUT;
+        stepIndex++;
+        phase = Phase.SELECT;
+        status = Component.translatable("integratedide.build.progress", stepIndex, steps.size());
         return true;
     }
 
     private boolean cleanupInput(ExpressionCompiler.CardStep step) {
         if (inputIndex >= step.inputs().size()) {
-            stepIndex++;
-            phase = Phase.SELECT;
-            status = Component.translatable("integratedide.build.progress", stepIndex, steps.size());
+            phase = Phase.RETURN_OUTPUT;
             return true;
         }
         port.cleanupInput(inputIndex);
@@ -313,7 +315,7 @@ public final class CardBuildDriver {
     private enum Phase {
         IDLE, SELECT, CONFIGURE, WAIT_INPUT_SLOT, PICK_INPUT, WAIT_INPUT_HELD, PLACE_INPUT,
         WAIT_INPUT_PLACED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
-        RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, STORE_OUTPUT, WAIT_OUTPUT_STORED, CONFIRM_OUTPUT,
-        CLEANUP_INPUT, WAIT_INPUT_RETURNED, COMPLETE, CANCELLED, FAILED
+        RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, CLEANUP_INPUT, WAIT_INPUT_RETURNED,
+        RETURN_OUTPUT, WAIT_OUTPUT_RETURNED, CONFIRM_OUTPUT, COMPLETE, CANCELLED, FAILED
     }
 }

@@ -40,9 +40,10 @@ interface CardBuildPort {
 
     boolean outputReady();
 
-    void storeOutput();
+    /** Return the completed write-slot card through the programmer's reset action. */
+    void returnOutput();
 
-    boolean outputStored();
+    boolean outputReturned();
 
     void confirmOutput(String stepId);
 

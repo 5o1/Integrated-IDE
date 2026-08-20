@@ -24,6 +24,13 @@ import org.cyclops.integrateddynamics.network.packet.LogicProgrammerValueTypeStr
 
 /** The only class allowed to translate a plan step into Integrated Dynamics GUI packets. */
 final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
+    /**
+     * Integrated Dynamics uses empty identifiers for its normal "reset the
+     * programmer" action. On the server, that action first returns the write
+     * slot to the player, then clears the active element.
+     */
+    private static final Identifier EMPTY_ELEMENT_ID = Identifier.parse("");
+
     private final ContainerLogicProgrammerBase menu;
 
     LogicProgrammerGateway(ContainerLogicProgrammerBase menu) {
@@ -96,6 +103,17 @@ final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
     void quickMove(Player player, int slot) {
         Minecraft minecraft = Minecraft.getInstance();
         minecraft.gameMode.handleContainerInput(menu.containerId, slot, 0, ContainerInput.QUICK_MOVE, player);
+    }
+
+    /**
+     * Mirrors the Logic Programmer's own reset button. This is a dedicated
+     * Integrated Dynamics packet, not a container click: it returns the
+     * completed Variable Card and clears the now-empty element configuration.
+     */
+    void returnOutputToPlayer() {
+        menu.returnWriteItemToPlayer();
+        menu.setActiveElementById(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID);
+        send(new LogicProgrammerActivateElementPacket(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

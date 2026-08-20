@@ -42,6 +42,8 @@ class CardBuildWorkflowTest {
                 "Every plan node must be confirmed in dependency order, not only the final expression.");
         assertEquals(new LinkedHashSet<>(expectedIds), driver.producedCards().keySet());
         assertEquals(expectedIds.size(), port.blankCardsConsumed);
+        assertEquals(expectedIds.size(), port.outputReturnRequests,
+                "Each completed card must use the programmer reset return path exactly once.");
 
         NovelCompilationCache.Reconciliation first = NovelCompilationCache.reconcile(compilation, List.of());
         Map<String, Integer> assignedIds = new LinkedHashMap<>();
@@ -196,8 +198,9 @@ class CardBuildWorkflowTest {
         CardBuildDriver driver = new CardBuildDriver(port, compilation.steps());
         driver.start();
         advanceUntil(driver, port::awaitingDelayedInventorySync);
-        // The preceding tick sent QUICK_MOVE. The following tick observes the
-        // still-missing server inventory update and must enter its wait state.
+        // The preceding tick sent the programmer's dedicated return request.
+        // The following tick observes the still-missing server inventory
+        // update and must enter its wait state.
         driver.tick();
 
         assertTrue(port.awaitingDelayedInventorySync(), "The third card must wait for the real inventory update.");
@@ -267,8 +270,9 @@ class CardBuildWorkflowTest {
         private String heldInput;
         private boolean blankPickedUp;
         private boolean outputReady;
-        private boolean outputMovedToInventory;
+        private boolean outputReturnedToInventory;
         private boolean delayedInventorySyncReceived;
+        private int outputReturnRequests;
         private String serverFailure;
 
         private InMemoryLogicProgrammer(int blankCards) {
@@ -306,7 +310,7 @@ class CardBuildWorkflowTest {
             assertEquals(null, heldInput, "A previous input card was not returned to the player inventory.");
             blankPickedUp = false;
             outputReady = false;
-            outputMovedToInventory = false;
+            outputReturnedToInventory = false;
         }
 
         @Override
@@ -381,30 +385,33 @@ class CardBuildWorkflowTest {
         }
 
         @Override
-        public void storeOutput() {
+        public void returnOutput() {
             assertTrue(outputReady);
-            // The write slot is empty after a shift-click. A normal test port
+            assertTrue(selectedInputs.stream().allMatch(cards::containsKey),
+                    "All operator inputs must be returned before resetting the programmer.");
+            outputReturnRequests++;
+            // The reset action returns the write-slot card. A normal test port
             // applies the inventory update immediately; the regression case
-            // below deliberately leaves the moved card invisible until later.
+            // below deliberately leaves it invisible until later.
             outputReady = false;
-            outputMovedToInventory = true;
+            outputReturnedToInventory = true;
         }
 
         @Override
-        public boolean outputStored() {
-            return outputMovedToInventory
+        public boolean outputReturned() {
+            return outputReturnedToInventory
                     && (confirmedStepIds.size() + 1 != delayedInventoryOutputNumber || delayedInventorySyncReceived);
         }
 
         @Override
         public void confirmOutput(String stepId) {
             assertEquals(activeStepId, stepId);
-            assertTrue(outputMovedToInventory, "The write-slot output was not moved before confirmation.");
+            assertTrue(outputReturnedToInventory, "The write-slot output was not returned before confirmation.");
             cards.put(stepId, ItemStack.EMPTY);
             confirmedStepIds.add(stepId);
             remainingBlankCards--;
             blankCardsConsumed++;
-            outputMovedToInventory = false;
+            outputReturnedToInventory = false;
         }
 
         @Override
@@ -422,7 +429,7 @@ class CardBuildWorkflowTest {
         }
 
         private boolean awaitingDelayedInventorySync() {
-            return outputMovedToInventory && confirmedStepIds.size() + 1 == delayedInventoryOutputNumber
+            return outputReturnedToInventory && confirmedStepIds.size() + 1 == delayedInventoryOutputNumber
                     && !delayedInventorySyncReceived;
         }
 

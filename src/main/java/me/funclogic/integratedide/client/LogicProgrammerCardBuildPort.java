@@ -20,6 +20,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private ItemStack pendingOutput = ItemStack.EMPTY;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
+    private boolean returningInputsAfterWrite;
 
     LogicProgrammerCardBuildPort(ContainerLogicProgrammerBase menu, Map<String, ItemStack> existingCards) {
         this.programmer = new LogicProgrammerGateway(menu);
@@ -34,6 +35,13 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
 
     @Override
     public String serverFailure() {
+        // Removing an input after its output has been written naturally makes
+        // the old active element invalid. The reset action immediately after
+        // cleanup clears that stale validation state, so it is not a build
+        // failure.
+        if (returningInputsAfterWrite) {
+            return null;
+        }
         if (errorBeforeAction == null) {
             return null;
         }
@@ -147,13 +155,14 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     }
 
     @Override
-    public void storeOutput() {
+    public void returnOutput() {
         beforeServerAction();
-        programmer.quickMove(player(), LogicProgrammerMenuLayout.writeSlot(programmer.menu()));
+        programmer.returnOutputToPlayer();
+        returningInputsAfterWrite = false;
     }
 
     @Override
-    public boolean outputStored() {
+    public boolean outputReturned() {
         return pendingOutput != null && !pendingOutput.isEmpty()
                 && programmer.slotIsEmpty(LogicProgrammerMenuLayout.writeSlot(programmer.menu()))
                 && CardInventory.findMatchingPlayerStack(programmer.menu(), player(), pendingOutput) != null;
@@ -177,6 +186,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         }
         int inputSlot = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
         if (!programmer.slotIsEmpty(inputSlot)) {
+            returningInputsAfterWrite = true;
             beforeServerAction();
             programmer.quickMove(player(), inputSlot);
         }
