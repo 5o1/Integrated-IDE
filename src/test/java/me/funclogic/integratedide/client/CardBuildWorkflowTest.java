@@ -201,6 +201,9 @@ class CardBuildWorkflowTest {
         for (int tick = 0; tick < 100 && !port.awaitingDelayedInventorySync(); tick++) {
             driver.tick();
         }
+        // The preceding tick sent QUICK_MOVE. The following tick observes the
+        // still-missing server inventory update and must enter its wait state.
+        driver.tick();
 
         assertTrue(port.awaitingDelayedInventorySync(), "The third card must wait for the real inventory update.");
         assertTrue(driver.isRunning());
