@@ -65,6 +65,8 @@ class CardBuildWorkflowTest {
                 () -> reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(server));
         runCase(failures, "withheld output synchronization",
                 () -> remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(server));
+        runCase(failures, "reset packet omits stale write-slot delta",
+                () -> reproducesTheStaleWriteSlotProtocolFailureWithoutLocalPrediction(server));
         runCase(failures, "insufficient third blank card",
                 () -> stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(server));
         if (!failures.isEmpty()) {
@@ -146,6 +148,27 @@ class CardBuildWorkflowTest {
         assertTrue(run.driver.isComplete(), run.driver.status());
     }
 
+    /**
+     * This guards the exact protocol edge case behind the original in-game
+     * stall: the Dynamic reset rebuilds its remote slots after clearing the
+     * write slot, so no empty-write delta is necessarily sent. The returned
+     * card does arrive in the client inventory, but an unpredicted local write
+     * slot still contains the stale result and must keep the driver waiting.
+     */
+    private static void reproducesTheStaleWriteSlotProtocolFailureWithoutLocalPrediction(MinecraftServer server) {
+        BuildRun run = start(server, "anyConstant(1, 1)", 3, false);
+
+        advanceUntilFirstOutputReturnIsSent(run);
+        run.port.flushServerChanges();
+        run.driver.tick();
+
+        assertTrue(run.port.serverHasReturnedCurrentOutput(),
+                "The server must return the result even when it omits the redundant write-slot delta.");
+        assertTrue(run.port.clientWriteStillContainsPendingOutput(),
+                "The unpredicted client write slot must reproduce the stale-card protocol state.");
+        assertTrue(run.driver.isRunning(), "The driver must not confirm a stale local write slot as a completed card.");
+    }
+
     private static void stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(MinecraftServer server) {
         BuildRun run = start(server, "anyConstant(1, 1)", 2);
 
@@ -157,9 +180,13 @@ class CardBuildWorkflowTest {
     }
 
     private static BuildRun start(MinecraftServer server, String source, int blankCards) {
+        return start(server, source, blankCards, true);
+    }
+
+    private static BuildRun start(MinecraftServer server, String source, int blankCards, boolean predictOutputClear) {
         ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(source);
         assertTrue(compilation.valid(), compilation.message());
-        ServerDrivenProgrammer port = ServerDrivenProgrammer.open(server, blankCards, false);
+        ServerDrivenProgrammer port = ServerDrivenProgrammer.open(server, blankCards, false, predictOutputClear);
         CardBuildDriver driver = new CardBuildDriver(port, compilation.steps());
         driver.start();
         return new BuildRun(compilation, port, driver);
@@ -236,6 +263,7 @@ class CardBuildWorkflowTest {
         private final ServerPlayer clientPlayer;
         private final ContainerLogicProgrammer serverMenu;
         private final ContainerLogicProgrammer clientMenu;
+        private final boolean predictOutputClear;
         private final Map<String, ItemStack> produced = new LinkedHashMap<>();
         private final Map<Integer, ItemStack> placedInputs = new LinkedHashMap<>();
         private final List<String> confirmedStepIds = new ArrayList<>();
@@ -251,12 +279,14 @@ class CardBuildWorkflowTest {
         private String lastCommand = "initial menu state";
 
         private ServerDrivenProgrammer(ServerLevel level, ServerPlayer serverPlayer, ServerPlayer clientPlayer,
-                                       ContainerLogicProgrammer serverMenu, ContainerLogicProgrammer clientMenu) {
+                                       ContainerLogicProgrammer serverMenu, ContainerLogicProgrammer clientMenu,
+                                       boolean predictOutputClear) {
             this.level = level;
             this.serverPlayer = serverPlayer;
             this.clientPlayer = clientPlayer;
             this.serverMenu = serverMenu;
             this.clientMenu = clientMenu;
+            this.predictOutputClear = predictOutputClear;
             this.snapshot = ObservedMenuState.empty(clientMenu.slots.size());
             // This is the server's actual container-delta boundary. The test
             // driver can see a slot only after AbstractContainerMenu has
@@ -266,6 +296,11 @@ class CardBuildWorkflowTest {
         }
 
         static ServerDrivenProgrammer open(MinecraftServer server, int blankCards, boolean separateStacks) {
+            return open(server, blankCards, separateStacks, true);
+        }
+
+        static ServerDrivenProgrammer open(MinecraftServer server, int blankCards, boolean separateStacks,
+                                           boolean predictOutputClear) {
             ServerLevel level = server.overworld();
             ServerPlayer serverPlayer = FakePlayerFactory.get(level,
                     new GameProfile(UUID.randomUUID(), "integratedide_junit_server"));
@@ -284,7 +319,8 @@ class CardBuildWorkflowTest {
             ContainerLogicProgrammer clientMenu = new ContainerLogicProgrammer(91, clientPlayer.getInventory());
             serverPlayer.containerMenu = serverMenu;
             clientPlayer.containerMenu = clientMenu;
-            return new ServerDrivenProgrammer(level, serverPlayer, clientPlayer, serverMenu, clientMenu);
+            return new ServerDrivenProgrammer(level, serverPlayer, clientPlayer, serverMenu, clientMenu,
+                    predictOutputClear);
         }
 
         void flushServerChanges() {
@@ -329,6 +365,10 @@ class CardBuildWorkflowTest {
         boolean serverHasReturnedCurrentOutput() {
             return serverMenu.slots.get(LogicProgrammerMenuLayout.writeSlot(serverMenu)).getItem().isEmpty()
                     && findServerPlayerStack(pendingOutput) != null;
+        }
+
+        boolean clientWriteStillContainsPendingOutput() {
+            return sameStack(snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu)), pendingOutput);
         }
 
         int validCardsInPlayerInventory() {
@@ -510,6 +550,9 @@ class CardBuildWorkflowTest {
             // LogicProgrammerGateway. It is intentionally not a successful
             // build signal; outputReturned still reads only packet-applied
             // client inventory state.
+            if (predictOutputClear) {
+                clientMenu.slots.get(LogicProgrammerMenuLayout.writeSlot(clientMenu)).set(ItemStack.EMPTY);
+            }
             clientMenu.setActiveElementById(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID);
             new LogicProgrammerActivateElementPacket(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID).actionServer(level, serverPlayer);
         }

@@ -107,13 +107,16 @@ final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
 
     /**
      * Requests the Logic Programmer's reset action. This is a dedicated
-     * Integrated Dynamics packet, not a container click. The native screen
-     * also resets its local menu first: that structural prediction is needed
-     * because the server's returned inventory-slot indexes are based on the
-     * reset layout. It is never treated as an acknowledgement; callers still
-     * wait for a newer server synchronization before accepting the card.
+     * Integrated Dynamics packet, not a container click. Its server handler
+     * returns the write item and then rebuilds the menu, which clears its
+     * remote-slot history. Consequently it can omit the otherwise redundant
+     * empty-write-slot delta. Predict both parts locally: empty the persistent
+     * write slot and rebuild the layout. This is never an acknowledgement;
+     * callers still wait for a newer server synchronization containing the
+     * returned inventory card before accepting the result.
      */
     void returnOutputToPlayer() {
+        menu.slots.get(LogicProgrammerMenuLayout.writeSlot(menu)).set(ItemStack.EMPTY);
         menu.setActiveElementById(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID);
         send(new LogicProgrammerActivateElementPacket(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID));
     }
