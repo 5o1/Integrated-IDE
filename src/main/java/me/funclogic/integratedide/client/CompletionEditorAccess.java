@@ -1,6 +1,7 @@
 package me.funclogic.integratedide.client;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.gui.components.MultiLineEditBox;
@@ -58,11 +59,17 @@ final class CompletionEditorAccess {
         }
         try {
             List<VisualLine> lines = new ArrayList<>();
-            for (MultilineTextField.StringView line : field.iterateLines()) {
-                lines.add(new VisualLine(line.beginIndex(), line.endIndex(), lines.size()));
+            Object views = field.iterateLines();
+            if (!(views instanceof Iterable<?> iterable)) {
+                return physicalLines(editor.getValue());
+            }
+            for (Object line : iterable) {
+                int start = lineOffset(line, "beginIndex");
+                int end = lineOffset(line, "endIndex");
+                lines.add(new VisualLine(start, end, lines.size()));
             }
             return lines.isEmpty() ? physicalLines(editor.getValue()) : List.copyOf(lines);
-        } catch (RuntimeException error) {
+        } catch (ReflectiveOperationException | RuntimeException error) {
             return physicalLines(editor.getValue());
         }
     }
@@ -129,10 +136,20 @@ final class CompletionEditorAccess {
 
     private static int visualLineStart(MultilineTextField field, int line, String source, int cursor) {
         try {
-            return field.getLineView(line).beginIndex();
-        } catch (RuntimeException error) {
+            return lineOffset(field.getLineView(line), "beginIndex");
+        } catch (ReflectiveOperationException | RuntimeException error) {
             return source.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1;
         }
+    }
+
+    /**
+     * StringView is protected in the compiled Minecraft API even though its
+     * accessors are public. Keep that implementation detail at this boundary.
+     */
+    private static int lineOffset(Object line, String accessor) throws ReflectiveOperationException {
+        Method method = line.getClass().getMethod(accessor);
+        method.trySetAccessible();
+        return (int) method.invoke(line);
     }
 
     private static List<VisualLine> physicalLines(String source) {
