@@ -92,6 +92,14 @@ class IntegratedDynamicsRegistryTest {
     }
 
     @Test
+    void createsEveryRegistryBackedLiteralPayloadBeforeItIsSentToTheProgrammer() {
+        assertFalse(CardLiteralFactory.itemStack("minecraft:cobblestone").isEmpty());
+        assertFalse(CardLiteralFactory.fluidBucket("minecraft:water").isEmpty());
+        assertTrue(CardLiteralFactory.ingredientsTag("minecraft:planks").getRawValue().isPresent(),
+                "The loaded tag must become a non-empty Dynamic ingredients value.");
+    }
+
+    @Test
     void neverReturnsMoreCandidatesThanThePopupCanDisplay() {
         LogicProgrammerCatalog catalog = LogicProgrammerCatalog.create();
         String source = "any";

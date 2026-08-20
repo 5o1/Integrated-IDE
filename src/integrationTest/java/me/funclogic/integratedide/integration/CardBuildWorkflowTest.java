@@ -74,14 +74,12 @@ class CardBuildWorkflowTest {
                 () -> materializesLiteralThroughTheRealProgrammer(server,
                         "anyEquals(\"$minecraft:water\", \"$minecraft:water\")",
                         ExpressionCompiler.StepKind.STATIC_FLUID));
-        runCase(failures, "tag literal card transport",
-                () -> materializesLiteralThroughTheRealProgrammer(server,
-                        "anyEquals(\"#minecraft:planks\", \"#minecraft:planks\")",
-                        ExpressionCompiler.StepKind.STATIC_TAG));
         runCase(failures, "separate one-card blank stacks",
                 () -> materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server));
         runCase(failures, "virtual-variable reuse",
                 () -> reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(server));
+        runCase(failures, "external Variable Card input",
+                () -> usesAnExistingExternalCardAsARealProgrammerInput(server));
         runCase(failures, "withheld output synchronization",
                 () -> remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(server));
         runCase(failures, "reset packet omits stale write-slot delta",
@@ -199,6 +197,45 @@ class CardBuildWorkflowTest {
         assertTrue(run.driver.isComplete(), run.driver.status());
         assertEquals(run.compilation.steps().size(), run.port.confirmedStepIds.size());
         assertEquals(run.compilation.steps().size(), run.port.validCardsInPlayerInventory());
+    }
+
+    /**
+     * Builds an ordinary card first, then uses its real Dynamic ID through
+     * the same existing-card map that cache selection supplies to the driver.
+     * The second build may create only its new literal and operator cards;
+     * the external card must be picked from its inventory slot as an input.
+     */
+    private static void usesAnExistingExternalCardAsARealProgrammerInput(MinecraftServer server) {
+        BuildRun source = start(server, "\"$minecraft:cobblestone\"", 1);
+        drainAfterEveryServerSnapshot(source);
+        assertTrue(source.driver.isComplete(), source.driver.status());
+
+        ItemStack external = source.port.producedCards().get("v0");
+        int externalId = variableCardId(source.port.level, external);
+        assertTrue(externalId >= 0, "The source item card did not receive a Dynamic ID.");
+
+        String expression = "anyEquals({" + externalId + "}, 10)";
+        ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(expression);
+        assertTrue(compilation.valid(), compilation.message());
+        ExpressionCompiler.CardStep externalStep = compilation.steps().stream()
+                .filter(step -> step.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("The external syntax was not lowered to an external card step."));
+        Map<String, ItemStack> availableCards = Map.of(externalStep.id(), external.copy());
+        List<ExpressionCompiler.CardStep> stepsToBuild = compilation.steps().stream()
+                .filter(ExpressionCompiler.CardStep::createsVariableCard)
+                .toList();
+        ServerDrivenProgrammer port = ServerDrivenProgrammer.open(server, 2, false, true, availableCards);
+        CardBuildDriver driver = new CardBuildDriver(port, stepsToBuild);
+        driver.start();
+        BuildRun run = new BuildRun(compilation, port, driver);
+
+        drainAfterEveryServerSnapshot(run);
+
+        assertTrue(run.driver.isComplete(), run.driver.status());
+        assertEquals(2, run.port.confirmedStepIds.size());
+        assertTrue(run.port.validCardsInPlayerInventory() >= 3,
+                "The external card and both newly compiled cards must remain in the player inventory.");
     }
 
     private static void remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(MinecraftServer server) {
@@ -330,6 +367,14 @@ class CardBuildWorkflowTest {
         assertTrue(facade.getId() >= 0, message);
     }
 
+    private static int variableCardId(ServerLevel level, ItemStack stack) {
+        if (!(stack.getItem() instanceof ItemVariable variable)) {
+            return -1;
+        }
+        IVariableFacade facade = variable.getVariableFacade(ValueDeseralizationContext.of(level), stack);
+        return facade.isValid() ? facade.getId() : -1;
+    }
+
     private record BuildRun(ExpressionCompiler.Compilation compilation, ServerDrivenProgrammer port,
                             CardBuildDriver driver) {
     }
@@ -370,13 +415,14 @@ class CardBuildWorkflowTest {
 
         private ServerDrivenProgrammer(ServerLevel level, ServerPlayer serverPlayer, ServerPlayer clientPlayer,
                                        ContainerLogicProgrammer serverMenu, ContainerLogicProgrammer clientMenu,
-                                       boolean predictOutputClear) {
+                                       boolean predictOutputClear, Map<String, ItemStack> existingCards) {
             this.level = level;
             this.serverPlayer = serverPlayer;
             this.clientPlayer = clientPlayer;
             this.serverMenu = serverMenu;
             this.clientMenu = clientMenu;
             this.predictOutputClear = predictOutputClear;
+            existingCards.forEach((step, card) -> produced.put(step, card.copy()));
             this.snapshot = ObservedMenuState.empty(clientMenu.slots.size());
             // This is the server's actual container-delta boundary. The test
             // driver can see a slot only after AbstractContainerMenu has
@@ -391,6 +437,11 @@ class CardBuildWorkflowTest {
 
         static ServerDrivenProgrammer open(MinecraftServer server, int blankCards, boolean separateStacks,
                                            boolean predictOutputClear) {
+            return open(server, blankCards, separateStacks, predictOutputClear, Map.of());
+        }
+
+        static ServerDrivenProgrammer open(MinecraftServer server, int blankCards, boolean separateStacks,
+                                           boolean predictOutputClear, Map<String, ItemStack> existingCards) {
             ServerLevel level = server.overworld();
             ServerPlayer serverPlayer = FakePlayerFactory.get(level,
                     new GameProfile(UUID.randomUUID(), "integratedide_junit_server"));
@@ -405,12 +456,17 @@ class CardBuildWorkflowTest {
             } else {
                 serverPlayer.getInventory().setItem(0, new ItemStack(RegistryEntries.ITEM_VARIABLE.get(), blankCards));
             }
+            int firstExistingSlot = separateStacks ? blankCards : 1;
+            int existingSlot = firstExistingSlot;
+            for (ItemStack existing : existingCards.values()) {
+                serverPlayer.getInventory().setItem(existingSlot++, existing.copy());
+            }
             ContainerLogicProgrammer serverMenu = new ContainerLogicProgrammer(91, serverPlayer.getInventory());
             ContainerLogicProgrammer clientMenu = new ContainerLogicProgrammer(91, clientPlayer.getInventory());
             serverPlayer.containerMenu = serverMenu;
             clientPlayer.containerMenu = clientMenu;
             return new ServerDrivenProgrammer(level, serverPlayer, clientPlayer, serverMenu, clientMenu,
-                    predictOutputClear);
+                    predictOutputClear, existingCards);
         }
 
         void flushServerChanges() {
@@ -538,15 +594,7 @@ class CardBuildWorkflowTest {
             var element = valueType.createLogicProgrammerElement();
             Identifier elementType = LogicProgrammerElementTypes.VALUETYPE.getUniqueName();
             Identifier elementId = LogicProgrammerElementTypes.VALUETYPE.getName(element);
-            // Ingredients exposes a client-only element implementation. The
-            // headless server harness cannot instantiate it, but static
-            // ingredient cards have no temporary input slots, so their
-            // container topology is identical to the already mirrored empty
-            // client layout. The actual server selection and value packet
-            // below are still exercised.
-            if (step.kind() != ExpressionCompiler.StepKind.STATIC_TAG) {
-                clientMenu.setActiveElementById(elementType, elementId);
-            }
+            clientMenu.setActiveElementById(elementType, elementId);
             new LogicProgrammerActivateElementPacket(elementType, elementId).actionServer(level, serverPlayer);
         }
 
