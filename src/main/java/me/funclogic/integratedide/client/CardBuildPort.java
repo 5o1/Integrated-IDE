@@ -8,7 +8,7 @@ import net.minecraft.world.item.ItemStack;
  * The side-effect boundary for building Variable Cards. The driver owns the
  * sequencing rules; this port owns client menu packets and inventory state.
  */
-interface CardBuildPort {
+public interface CardBuildPort {
     boolean isCurrent();
 
     /**

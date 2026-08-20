@@ -1,4 +1,4 @@
-package me.funclogic.integratedide.client;
+package me.funclogic.integratedide.integration;
 
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;

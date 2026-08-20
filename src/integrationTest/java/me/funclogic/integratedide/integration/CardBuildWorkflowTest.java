@@ -1,4 +1,4 @@
-package me.funclogic.integratedide.client;
+package me.funclogic.integratedide.integration;
 
 import com.mojang.authlib.GameProfile;
 import java.util.ArrayList;
@@ -8,6 +8,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import me.funclogic.integratedide.client.CardBuildDriver;
+import me.funclogic.integratedide.client.CardBuildPort;
+import me.funclogic.integratedide.client.CardLiteralFactory;
+import me.funclogic.integratedide.client.LogicProgrammerCatalog;
+import me.funclogic.integratedide.client.LogicProgrammerMenuLayout;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;

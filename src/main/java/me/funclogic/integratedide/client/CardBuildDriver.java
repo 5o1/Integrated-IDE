@@ -34,10 +34,11 @@ public final class CardBuildDriver {
     }
 
     /**
-     * Package-private injection point for FML-backed state-machine tests. The
-     * public constructor always uses the real Logic Programmer menu port.
+     * Creates a driver around an explicit programmer command port. This keeps
+     * transaction sequencing independent from GUI transport and makes the
+     * same contract verifiable against a real server menu.
      */
-    CardBuildDriver(CardBuildPort port, List<ExpressionCompiler.CardStep> steps) {
+    public CardBuildDriver(CardBuildPort port, List<ExpressionCompiler.CardStep> steps) {
         this.port = port;
         this.steps = List.copyOf(steps);
     }

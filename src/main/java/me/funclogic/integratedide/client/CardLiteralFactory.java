@@ -20,11 +20,11 @@ import org.cyclops.commoncapabilities.api.ingredient.MixedIngredients;
 import org.cyclops.integrateddynamics.core.evaluate.variable.ValueObjectTypeIngredients;
 
 /** Converts Novel literals to the exact values accepted by vanilla programmer elements. */
-final class CardLiteralFactory {
+public final class CardLiteralFactory {
     private CardLiteralFactory() {
     }
 
-    static ItemStack itemStack(String value) {
+    public static ItemStack itemStack(String value) {
         Identifier id = requiredId(value, "item");
         if (!BuiltInRegistries.ITEM.containsKey(id)) {
             throw new IllegalArgumentException("Unknown item identifier: " + value);
@@ -32,7 +32,7 @@ final class CardLiteralFactory {
         return new ItemStack(BuiltInRegistries.ITEM.getValue(id));
     }
 
-    static ItemStack fluidBucket(String value) {
+    public static ItemStack fluidBucket(String value) {
         Identifier id = requiredId(value, "fluid");
         if (!BuiltInRegistries.FLUID.containsKey(id)) {
             throw new IllegalArgumentException("Unknown fluid identifier: " + value);
@@ -49,7 +49,7 @@ final class CardLiteralFactory {
         return bucket;
     }
 
-    static ValueObjectTypeIngredients.ValueIngredients ingredientsTag(String value) {
+    public static ValueObjectTypeIngredients.ValueIngredients ingredientsTag(String value) {
         Identifier id = requiredId(value, "tag");
         Map<IngredientComponent<?, ?>, List<?>> values = new HashMap<>();
         List<ItemStack> items = new ArrayList<>();

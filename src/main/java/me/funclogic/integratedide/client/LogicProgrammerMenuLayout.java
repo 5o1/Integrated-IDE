@@ -13,15 +13,15 @@ import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgramm
  * slots whenever the selected element changes, so callers must resolve inputs
  * at the point of use.
  */
-final class LogicProgrammerMenuLayout {
+public final class LogicProgrammerMenuLayout {
     private LogicProgrammerMenuLayout() {
     }
 
-    static int writeSlot(ContainerLogicProgrammerBase menu) {
+    public static int writeSlot(ContainerLogicProgrammerBase menu) {
         return resolveWriteSlot(menu.slots, menu.getTemporaryInputSlots());
     }
 
-    static int inputSlot(ContainerLogicProgrammerBase menu, int inputIndex) {
+    public static int inputSlot(ContainerLogicProgrammerBase menu, int inputIndex) {
         List<Integer> inputs = resolveInputSlots(menu.slots, menu.getTemporaryInputSlots());
         if (inputIndex < 0 || inputIndex >= inputs.size()) {
             throw new IllegalStateException("The active Logic Programmer element exposes " + inputs.size()
@@ -30,11 +30,11 @@ final class LogicProgrammerMenuLayout {
         return inputs.get(inputIndex);
     }
 
-    static int inputSlotCount(ContainerLogicProgrammerBase menu) {
+    public static int inputSlotCount(ContainerLogicProgrammerBase menu) {
         return resolveInputSlots(menu.slots, menu.getTemporaryInputSlots()).size();
     }
 
-    static Slot writeSlotView(ContainerLogicProgrammerBase menu) {
+    public static Slot writeSlotView(ContainerLogicProgrammerBase menu) {
         return menu.slots.get(writeSlot(menu));
     }
 
