@@ -186,6 +186,32 @@ class CardBuildWorkflowTest {
         assertTrue(driver.status().contains("\u8f93\u51fa\u8d85\u65f6"), driver.status());
     }
 
+    /**
+     * Characterizes the report from {@code anyConstant(1, 1)}: the third card
+     * has left the programmer write slot, but its player-inventory update has
+     * not arrived by the driver's immediate confirmation step yet.
+     *
+     * <p>This intentionally asserts the current failure. Once the production
+     * state machine waits for the inventory acknowledgement, invert these
+     * expectations into a successful three-card build.</p>
+     */
+    @Test
+    void reproducesAnyConstantThirdCardFailureWhenInventorySyncIsDelayed() {
+        ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile("anyConstant(1, 1)");
+        assertTrue(compilation.valid(), compilation.message());
+        assertEquals(3, compilation.steps().size(), "The reported expression must build two inputs and one result.");
+
+        InMemoryLogicProgrammer port = new InMemoryLogicProgrammer(12, Integer.MAX_VALUE, 3);
+        CardBuildDriver driver = new CardBuildDriver(port, compilation.steps());
+        driver.start();
+        drain(driver);
+
+        assertTrue(driver.isFailed(), "The current state machine confirms before the delayed inventory update arrives.");
+        assertEquals(2, port.confirmedStepIds.size(), "The first two cards must complete before the reported failure.");
+        assertEquals(compilation.steps().get(2).id(), port.unavailableOutputStepId);
+        assertTrue(driver.status().contains("\u672a\u80fd\u5728\u80cc\u5305\u4e2d\u5b9a\u4f4d\u65b0\u53d8\u91cf\u5361"), driver.status());
+    }
+
     private static void drain(CardBuildDriver driver) {
         for (int tick = 0; tick < 1_000 && driver.isRunning(); tick++) {
             driver.tick();
@@ -198,20 +224,28 @@ class CardBuildWorkflowTest {
         private final List<String> confirmedStepIds = new ArrayList<>();
         private final List<String> selectedInputs = new ArrayList<>();
         private final int maximumOutputs;
+        private final int delayedInventoryOutputNumber;
         private int remainingBlankCards;
         private int blankCardsConsumed;
         private String activeStepId;
         private String heldInput;
+        private String unavailableOutputStepId;
         private boolean blankPickedUp;
         private boolean outputReady;
+        private boolean outputMovedToInventory;
 
         private InMemoryLogicProgrammer(int blankCards) {
-            this(blankCards, Integer.MAX_VALUE);
+            this(blankCards, Integer.MAX_VALUE, -1);
         }
 
         private InMemoryLogicProgrammer(int blankCards, int maximumOutputs) {
+            this(blankCards, maximumOutputs, -1);
+        }
+
+        private InMemoryLogicProgrammer(int blankCards, int maximumOutputs, int delayedInventoryOutputNumber) {
             this.remainingBlankCards = blankCards;
             this.maximumOutputs = maximumOutputs;
+            this.delayedInventoryOutputNumber = delayedInventoryOutputNumber;
         }
 
         private void preload(Map<String, ItemStack> existingCards) {
@@ -230,6 +264,7 @@ class CardBuildWorkflowTest {
             assertEquals(null, heldInput, "A previous input card was not returned to the player inventory.");
             blankPickedUp = false;
             outputReady = false;
+            outputMovedToInventory = false;
         }
 
         @Override
@@ -281,17 +316,26 @@ class CardBuildWorkflowTest {
         @Override
         public void storeOutput() {
             assertTrue(outputReady);
+            // The write slot is empty after a shift-click. A normal test port
+            // applies the inventory update immediately; the regression case
+            // below deliberately leaves the moved card invisible until later.
+            outputReady = false;
+            outputMovedToInventory = true;
         }
 
         @Override
         public void confirmOutput(String stepId) {
             assertEquals(activeStepId, stepId);
-            assertTrue(outputReady);
+            assertTrue(outputMovedToInventory, "The write-slot output was not moved before confirmation.");
+            if (confirmedStepIds.size() + 1 == delayedInventoryOutputNumber) {
+                unavailableOutputStepId = stepId;
+                throw new IllegalStateException("\u672a\u80fd\u5728\u80cc\u5305\u4e2d\u5b9a\u4f4d\u65b0\u53d8\u91cf\u5361");
+            }
             cards.put(stepId, ItemStack.EMPTY);
             confirmedStepIds.add(stepId);
             remainingBlankCards--;
             blankCardsConsumed++;
-            outputReady = false;
+            outputMovedToInventory = false;
         }
 
         @Override
