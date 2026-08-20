@@ -278,6 +278,7 @@ class CardBuildWorkflowTest {
 
         void flushServerChanges() {
             serverMenu.broadcastChanges();
+            assertClientLayoutMatchesServer();
         }
 
         private void receiveInitialState(int stateId, List<ItemStack> slots, ItemStack carried) {
@@ -478,6 +479,11 @@ class CardBuildWorkflowTest {
         public void returnOutput() {
             beforeServerAction();
             returnOutputRequests++;
+            // This is the same topology prediction performed by
+            // LogicProgrammerGateway. It is intentionally not a successful
+            // build signal; outputReturned still reads only packet-applied
+            // client inventory state.
+            clientMenu.setActiveElementById(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID);
             new LogicProgrammerActivateElementPacket(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID).actionServer(level, serverPlayer);
         }
 
@@ -571,6 +577,19 @@ class CardBuildWorkflowTest {
 
         private String errorText() {
             return serverMenu.getLastError() == null ? "" : serverMenu.getLastError().getString();
+        }
+
+        private void assertClientLayoutMatchesServer() {
+            int serverInputs = LogicProgrammerMenuLayout.inputSlotCount(serverMenu);
+            int clientInputs = LogicProgrammerMenuLayout.inputSlotCount(clientMenu);
+            int serverWrite = LogicProgrammerMenuLayout.writeSlot(serverMenu);
+            int clientWrite = LogicProgrammerMenuLayout.writeSlot(clientMenu);
+            if (serverMenu.slots.size() != clientMenu.slots.size() || serverInputs != clientInputs
+                    || serverWrite != clientWrite) {
+                throw new AssertionError("Client Logic Programmer layout diverged after server synchronization: "
+                        + "server slots=" + serverMenu.slots.size() + ", inputs=" + serverInputs + ", write=" + serverWrite
+                        + "; client slots=" + clientMenu.slots.size() + ", inputs=" + clientInputs + ", write=" + clientWrite);
+            }
         }
 
         private static List<Integer> playerInventorySlots(ContainerLogicProgrammerBase menu, ServerPlayer player) {

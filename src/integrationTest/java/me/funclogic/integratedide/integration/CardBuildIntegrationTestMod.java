@@ -30,7 +30,6 @@ public final class CardBuildIntegrationTestMod {
             // NeoForge logs and continues after exceptions from lifecycle
             // listeners. Terminate this test-only JVM explicitly so a failed
             // server workflow can never produce a green Gradle build.
-            event.getServer().halt(false);
             System.exit(1);
         }
     }
