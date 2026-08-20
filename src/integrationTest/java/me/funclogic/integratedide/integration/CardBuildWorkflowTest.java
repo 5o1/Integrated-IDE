@@ -133,15 +133,15 @@ class CardBuildWorkflowTest {
 
         long revisionBeforePlacementFlush = run.port.synchronizationRevision();
         run.port.flushServerChanges();
-        assertEquals(revisionBeforePlacementFlush, run.port.synchronizationRevision(),
-                "A correctly predicted reference-input click must not require a redundant server slot delta.");
+        assertTrue(run.port.synchronizationRevision() > revisionBeforePlacementFlush,
+                "Dynamic must confirm the reference stored in its temporary input slot.");
         run.driver.tick();
         assertTrue(run.port.hasSentInputCursorReturn(),
                 "The driver must return the predicted cursor card through a separate container click.");
         long revisionBeforeReturnFlush = run.port.synchronizationRevision();
         run.port.flushServerChanges();
-        assertEquals(revisionBeforeReturnFlush, run.port.synchronizationRevision(),
-                "Returning a correctly predicted cursor card must also progress without a redundant server delta.");
+        assertTrue(run.port.synchronizationRevision() > revisionBeforeReturnFlush,
+                "Dynamic must confirm the returned input card in the player inventory.");
         run.driver.tick();
 
         assertTrue(run.port.clientCursorIsEmpty(),
@@ -681,33 +681,7 @@ class CardBuildWorkflowTest {
             produced.put(stepId, stored.copy());
             confirmedStepIds.add(stepId);
             pendingOutputId = -1;
-        }
-
-        @Override
-        public void cleanupInput(int inputIndex) {
-            if (!inputSlotReady(inputIndex)) {
-                throw new IllegalStateException("The active element no longer exposes input " + inputIndex + '.');
-            }
-            int slot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            if (!snapshot.slot(slot).isEmpty()) {
-                click("return input " + (inputIndex + 1), slot, 0, ContainerInput.QUICK_MOVE);
-            }
-        }
-
-        @Override
-        public boolean inputReturned(int inputIndex, String stepId) {
-            Integer expectedId = placedInputIds.get(inputIndex);
-            if (expectedId == null || !inputSlotReady(inputIndex)) {
-                return false;
-            }
-            int inputSlot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            boolean returned = snapshot.slot(inputSlot).isEmpty() && findReceivedVariableCard(expectedId) != null;
-            if (!returned) {
-                trace("input " + (inputIndex + 1) + " return pending: expected id=" + expectedId + ", slot="
-                        + variableCardId(snapshot.slot(inputSlot)) + ", inventory="
-                        + describe(findReceivedVariableCard(expectedId)));
-            }
-            return returned;
+            placedInputIds.clear();
         }
 
         @Override

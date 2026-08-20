@@ -12,10 +12,10 @@ import org.slf4j.Logger;
 
 /**
  * Drives one Variable Card plan through the normal Logic Programmer menu.
- * Commands are never separated by guessed tick delays. Ordinary container
- * clicks use Minecraft's local prediction and are sent in order; only a
- * Variable Card that Dynamic creates or returns on the server is an
- * authoritative synchronization barrier.
+ * Commands are never separated by guessed tick delays. Every Dynamic menu
+ * mutation waits for the precise synchronized slot or inventory state that
+ * confirms it; local prediction is used only where Dynamic's reset protocol
+ * intentionally omits a redundant empty-slot packet.
  */
 public final class CardBuildDriver {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -93,9 +93,8 @@ public final class CardBuildDriver {
     /**
      * Called from the client tick event. It dispatches consecutive local
      * commands immediately, then stops only at a concrete synchronization
-     * condition. Predicted clicks can safely be queued in one tick because
-     * Minecraft preserves packet order; server-created cards form the
-     * concrete barriers that end the dispatch sequence.
+     * condition. Each mutation forms a state barrier, so a valid plan cannot
+     * spin through unbounded transitions in one client tick.
      */
     public void tick() {
         if (!isRunning()) {
@@ -144,8 +143,6 @@ public final class CardBuildDriver {
             case WAIT_OUTPUT_READY -> waitForOutputReady();
             case RETURN_REMAINDER -> returnRemainder();
             case WAIT_REMAINDER_RETURNED -> waitForRemainderReturned();
-            case CLEANUP_INPUT -> cleanupInput(step);
-            case WAIT_INPUT_RETURNED -> waitForInputReturned(step);
             case RETURN_OUTPUT -> returnOutput();
             case WAIT_OUTPUT_RETURNED -> waitForOutputReturned();
             case CONFIRM_OUTPUT -> confirmOutput(step);
@@ -188,7 +185,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputHeld(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!port.inputHeld(input)) {
+        if (!synchronizedAfterCommand() || !port.inputHeld(input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_held", inputIndex + 1));
         }
         phase = Phase.PLACE_INPUT;
@@ -203,7 +200,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputPlaced(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!port.inputPlaced(inputIndex, input)) {
+        if (!synchronizedAfterCommand() || !port.inputPlaced(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_placed", inputIndex + 1));
         }
         phase = Phase.RETURN_INPUT_CURSOR;
@@ -221,7 +218,7 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForInputCursorReturned(ExpressionCompiler.CardStep step) {
-        if (!port.inputCursorReturned()) {
+        if (!synchronizedAfterCommand() || !port.inputCursorReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.input_cursor", inputIndex + 1));
         }
         advanceInput(step);
@@ -240,7 +237,7 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForBlankHeld() {
-        if (!port.blankHeld()) {
+        if (!synchronizedAfterCommand() || !port.blankHeld()) {
             return waiting(Component.translatable("integratedide.build.wait.blank_held"));
         }
         phase = Phase.PLACE_BLANK;
@@ -264,8 +261,7 @@ public final class CardBuildDriver {
     private boolean returnRemainder() {
         commandRevision = port.synchronizationRevision();
         if (!port.returnBlankRemainder()) {
-            inputIndex = 0;
-            phase = Phase.CLEANUP_INPUT;
+            phase = Phase.RETURN_OUTPUT;
             return true;
         }
         phase = Phase.WAIT_REMAINDER_RETURNED;
@@ -273,13 +269,13 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForRemainderReturned() {
-        if (!port.blankRemainderReturned()) {
+        if (!synchronizedAfterCommand() || !port.blankRemainderReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.remainder"));
         }
-        // The dedicated reset packet clears the active element, so all
-        // temporary operator inputs must be returned before it is sent.
-        inputIndex = 0;
-        phase = Phase.CLEANUP_INPUT;
+        // Input slots hold references, not owned stacks: each source card
+        // has already been returned to its player-inventory slot. Dynamic's
+        // reset clears those temporary references together with the output.
+        phase = Phase.RETURN_OUTPUT;
         return true;
     }
 
@@ -305,35 +301,14 @@ public final class CardBuildDriver {
         return true;
     }
 
-    private boolean cleanupInput(ExpressionCompiler.CardStep step) {
-        if (inputIndex >= step.inputs().size()) {
-            phase = Phase.RETURN_OUTPUT;
-            return true;
-        }
-        issue(() -> port.cleanupInput(inputIndex));
-        phase = Phase.WAIT_INPUT_RETURNED;
-        return false;
-    }
-
-    private boolean waitForInputReturned(ExpressionCompiler.CardStep step) {
-        String input = step.inputs().get(inputIndex);
-        if (!port.inputReturned(inputIndex, input)) {
-            return waiting(Component.translatable("integratedide.build.wait.input_returned"));
-        }
-        inputIndex++;
-        phase = Phase.CLEANUP_INPUT;
-        return true;
-    }
-
     private boolean waiting(Component message) {
         status = message;
         return false;
     }
 
     /**
-     * Dispatch a mutation and retain the last authoritative revision for the
-     * server-created-card phases. Normal container clicks instead use their
-     * already-applied local prediction as their immediate postcondition.
+     * Dispatch a menu mutation and establish the exact client snapshot that
+     * must be superseded before its postcondition may be observed.
      */
     private void issue(Runnable command) {
         commandRevision = port.synchronizationRevision();
@@ -363,7 +338,7 @@ public final class CardBuildDriver {
     private enum Phase {
         IDLE, SELECT, CONFIGURE, WAIT_INPUT_SLOT, PICK_INPUT, WAIT_INPUT_HELD, PLACE_INPUT,
         WAIT_INPUT_PLACED, RETURN_INPUT_CURSOR, WAIT_INPUT_CURSOR_RETURNED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
-        RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, CLEANUP_INPUT, WAIT_INPUT_RETURNED,
+        RETURN_REMAINDER, WAIT_REMAINDER_RETURNED,
         RETURN_OUTPUT, WAIT_OUTPUT_RETURNED, CONFIRM_OUTPUT, COMPLETE, CANCELLED, FAILED
     }
 }

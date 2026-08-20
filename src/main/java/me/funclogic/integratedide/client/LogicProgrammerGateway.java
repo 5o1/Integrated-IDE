@@ -100,11 +100,6 @@ final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
         minecraft.gameMode.handleContainerInput(menu.containerId, slot, button, ContainerInput.PICKUP, player);
     }
 
-    void quickMove(Player player, int slot) {
-        Minecraft minecraft = Minecraft.getInstance();
-        minecraft.gameMode.handleContainerInput(menu.containerId, slot, 0, ContainerInput.QUICK_MOVE, player);
-    }
-
     /**
      * Requests the Logic Programmer's reset action. This is a dedicated
      * Integrated Dynamics packet, not a container click. Its server handler

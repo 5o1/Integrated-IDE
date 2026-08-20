@@ -215,36 +215,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         }
         produced.put(stepId, stored.copy());
         pendingOutputId = -1;
-    }
-
-    @Override
-    public void cleanupInput(int inputIndex) {
-        if (!inputSlotReady(inputIndex)) {
-            throw new IllegalStateException("The active Logic Programmer element no longer exposes input "
-                    + (inputIndex + 1) + ".");
-        }
-        int inputSlot = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
-        if (!programmer.slotIsEmpty(inputSlot)) {
-            beforeServerAction();
-            programmer.quickMove(player(), inputSlot);
-        }
-    }
-
-    @Override
-    public boolean inputReturned(int inputIndex, String stepId) {
-        Integer expectedId = placedInputIds.get(inputIndex);
-        if (expectedId == null || !inputSlotReady(inputIndex)) {
-            return false;
-        }
-        int inputSlot = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
-        if (!programmer.slotIsEmpty(inputSlot)) {
-            return false;
-        }
-        boolean returned = CardInventory.findVariableCardSlotById(programmer.menu(), player(), expectedId) >= 0;
-        if (returned) {
-            placedInputIds.remove(inputIndex);
-        }
-        return returned;
+        placedInputIds.clear();
     }
 
     @Override
