@@ -1,0 +1,31 @@
+license="MIT"
+
+[[mods]]
+modId="integratedide_test"
+version="1.0.0-test"
+displayName="Integrated IDE Integration Tests"
+authors="5o1"
+description='''
+Test-only dedicated-server harness for Integrated IDE's Logic Programmer transaction tests.
+'''
+
+[[dependencies.integratedide_test]]
+modId="neoforge"
+type="required"
+versionRange="[26.1.2,)"
+ordering="NONE"
+side="SERVER"
+
+[[dependencies.integratedide_test]]
+modId="minecraft"
+type="required"
+versionRange="[26.1.2]"
+ordering="NONE"
+side="SERVER"
+
+[[dependencies.integratedide_test]]
+modId="integrateddynamics"
+type="required"
+versionRange="[1.33.9,)"
+ordering="AFTER"
+side="SERVER"
