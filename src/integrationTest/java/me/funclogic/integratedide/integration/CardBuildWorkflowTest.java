@@ -213,7 +213,7 @@ class CardBuildWorkflowTest {
             if (run.port.synchronizationRevision() == revisionBeforeTick) {
                 throw new AssertionError("The server emitted no container synchronization after "
                         + (run.port.commandCount() == commandsBeforeTick ? "the pending transition" : "command")
-                        + ". " + run.port.describeState());
+                        + "; driver=" + run.driver.status() + ". " + run.port.describeState());
             }
         }
     }
@@ -403,7 +403,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public void select(ExpressionCompiler.CardStep step) {
-            beforeServerAction();
+            beforeServerAction("select " + step.id());
             if (step.kind() == ExpressionCompiler.StepKind.DYNAMIC_OPERATOR) {
                 Identifier operatorId = Identifier.parse(step.value());
                 IOperator operator = Operators.REGISTRY.getOperator(operatorId);
@@ -430,7 +430,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public void configure(ExpressionCompiler.CardStep step) {
-            beforeServerAction();
+            beforeServerAction("configure " + step.id());
             switch (step.kind()) {
                 case STATIC_TEXT, STATIC_MOD -> new LogicProgrammerValueTypeStringValueChangedPacket(step.value())
                         .actionServer(level, serverPlayer);
@@ -459,7 +459,7 @@ class CardBuildWorkflowTest {
                 throw new IllegalStateException("The synchronized inventory no longer contains input " + stepId);
             }
             pendingInputId = inputId;
-            beforeServerAction();
+            beforeServerAction("pick input " + stepId);
             serverMenu.clicked(sourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
         }
 
@@ -478,7 +478,7 @@ class CardBuildWorkflowTest {
         public void placeInput(int inputIndex) {
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
             placedInputIds.put(inputIndex, pendingInputId);
-            beforeServerAction();
+            beforeServerAction("place input " + (inputIndex + 1));
             serverMenu.clicked(target, 0, ContainerInput.PICKUP, serverPlayer);
         }
 
@@ -489,7 +489,12 @@ class CardBuildWorkflowTest {
                 return false;
             }
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            return snapshot.carried.isEmpty() && variableCardId(snapshot.slot(target)) == expectedId;
+            boolean placed = snapshot.carried.isEmpty() && variableCardId(snapshot.slot(target)) == expectedId;
+            if (!placed) {
+                trace("input " + (inputIndex + 1) + " pending: expected id=" + expectedId + ", slot="
+                        + variableCardId(snapshot.slot(target)) + ", carried=" + describe(snapshot.carried));
+            }
+            return placed;
         }
 
         @Override
@@ -498,7 +503,7 @@ class CardBuildWorkflowTest {
             if (blankSourceSlot < 0) {
                 throw new IllegalStateException("Blank Variable Cards are exhausted.");
             }
-            beforeServerAction();
+            beforeServerAction("pick blank card");
             serverMenu.clicked(blankSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
         }
 
@@ -509,7 +514,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public void placeBlank() {
-            beforeServerAction();
+            beforeServerAction("place blank card");
             serverMenu.clicked(LogicProgrammerMenuLayout.writeSlot(clientMenu), 1, ContainerInput.PICKUP, serverPlayer);
         }
 
@@ -522,7 +527,7 @@ class CardBuildWorkflowTest {
             if (blankSourceSlot < 0) {
                 throw new IllegalStateException("No source slot is available for the remaining blank cards.");
             }
-            beforeServerAction();
+            beforeServerAction("return blank remainder");
             serverMenu.clicked(blankSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
             blankSourceSlot = -1;
             return true;
@@ -549,7 +554,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public void returnOutput() {
-            beforeServerAction();
+            beforeServerAction("return output");
             returnOutputRequests++;
             // This is the same topology prediction performed by
             // LogicProgrammerGateway. It is intentionally not a successful
@@ -587,7 +592,7 @@ class CardBuildWorkflowTest {
             }
             int slot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
             if (!snapshot.slot(slot).isEmpty()) {
-                beforeServerAction();
+                beforeServerAction("return input " + (inputIndex + 1));
                 serverMenu.clicked(slot, 0, ContainerInput.QUICK_MOVE, serverPlayer);
             }
         }
@@ -599,7 +604,13 @@ class CardBuildWorkflowTest {
                 return false;
             }
             int inputSlot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            return snapshot.slot(inputSlot).isEmpty() && findReceivedVariableCard(expectedId) != null;
+            boolean returned = snapshot.slot(inputSlot).isEmpty() && findReceivedVariableCard(expectedId) != null;
+            if (!returned) {
+                trace("input " + (inputIndex + 1) + " return pending: expected id=" + expectedId + ", slot="
+                        + variableCardId(snapshot.slot(inputSlot)) + ", inventory="
+                        + describe(findReceivedVariableCard(expectedId)));
+            }
+            return returned;
         }
 
         @Override
@@ -607,11 +618,11 @@ class CardBuildWorkflowTest {
             return Collections.unmodifiableMap(new LinkedHashMap<>(produced));
         }
 
-        private void beforeServerAction() {
+        private void beforeServerAction(String action) {
             errorBeforeAction = errorText();
             commandCount++;
-            lastCommand = "action " + commandCount;
-            trace("command " + commandCount);
+            lastCommand = action;
+            trace("command " + commandCount + ": " + action);
         }
 
         private void trace(String event) {
