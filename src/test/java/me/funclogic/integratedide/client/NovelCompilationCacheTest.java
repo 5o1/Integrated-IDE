@@ -39,8 +39,7 @@ class NovelCompilationCacheTest {
                                                                         NovelCompilationCache.Reconciliation graph) {
         return program.steps().stream()
                 .map(step -> new NovelCompilationCache.CachedNode(graph.fingerprint(step.id()),
-                        100 + Integer.parseInt(step.id().substring(1)),
-                        step.inputs().stream().map(graph::fingerprint).toList()))
+                        100 + Integer.parseInt(step.id().substring(1))))
                 .toList();
     }
 

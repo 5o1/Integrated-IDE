@@ -73,16 +73,7 @@ final class ExpressionPlanBuilder {
         if (type == null) {
             throw new ExpressionCompileError(literal.position(), "This literal cannot be converted to the required type.");
         }
-        ExpressionCompiler.StepKind kind = switch (literal.kind()) {
-            case STRING, INTEGER, DECIMAL -> ExpressionCompiler.StepKind.STATIC_TEXT;
-            case MOD -> ExpressionCompiler.StepKind.STATIC_MOD;
-            case BOOLEAN -> ExpressionCompiler.StepKind.STATIC_BOOLEAN;
-            case ITEM -> ExpressionCompiler.StepKind.STATIC_ITEM;
-            case TAG -> ExpressionCompiler.StepKind.STATIC_TAG;
-        };
-        if (literal.kind() == ExpressionCompiler.LiteralKind.ITEM && type.displayName().equalsIgnoreCase("fluidstack")) {
-            kind = ExpressionCompiler.StepKind.STATIC_FLUID;
-        }
+        ExpressionCompiler.StepKind kind = catalog.literalStepKind(literal.kind(), type);
         return add(kind, literal.value(), List.of(), type, literal.position(), literal.end());
     }
 

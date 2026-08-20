@@ -12,8 +12,7 @@ class NovelDiagnosticTest {
         NovelDiagnostic diagnostic = NovelDiagnostic.compilation(compilation);
 
         assertEquals(NovelDiagnostic.Severity.ERROR, diagnostic.severity());
-        assertTrue(diagnostic.text().startsWith("\u7f16\u8bd1\u5931\u8d25\n"));
-        assertTrue(diagnostic.text().contains(compilation.message()));
+        assertTrue(diagnostic.text().getString().contains(compilation.message()));
     }
 
     @Test
@@ -23,7 +22,6 @@ class NovelDiagnosticTest {
                 RuntimeExpressionValidator.Result.failure("Missing test operator"));
 
         assertEquals(NovelDiagnostic.Severity.ERROR, diagnostic.severity());
-        assertTrue(diagnostic.text().startsWith("\u8fd0\u884c\u73af\u5883\u68c0\u67e5\u5931\u8d25\n"));
-        assertTrue(diagnostic.text().contains("Missing test operator"));
+        assertTrue(diagnostic.text().getString().contains("Missing test operator"));
     }
 }

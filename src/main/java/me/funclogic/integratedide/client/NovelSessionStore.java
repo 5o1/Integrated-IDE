@@ -14,6 +14,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import org.slf4j.Logger;
 final class NovelSessionStore {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final int SCHEMA_VERSION = 2;
     private static FileState fileState;
     private static boolean dirty;
 
@@ -79,9 +81,11 @@ final class NovelSessionStore {
             if (fileState == null || fileState.sessions == null) {
                 throw new JsonParseException("The cache root is empty or malformed.");
             }
-            validate(fileState);
+            migrateAndValidate(fileState);
         } catch (IOException | RuntimeException error) {
-            LOGGER.warn("Integrated IDE discarded an unreadable Novel session cache and started with an empty editor.", error);
+            preserveUnreadableCache(source);
+            LOGGER.warn("Integrated IDE could not read the Novel session cache; preserved the source and started "
+                    + "with an empty editor.", error);
             fileState = new FileState();
             markDirty();
         }
@@ -92,17 +96,47 @@ final class NovelSessionStore {
                 .resolve("novel_sessions.json");
     }
 
-    private static void validate(FileState state) {
-        for (Map.Entry<String, SavedSession> entry : state.sessions.entrySet()) {
-            if (entry.getKey() == null || entry.getValue() == null || entry.getValue().nodes == null) {
-                throw new JsonParseException("The cache contains an incomplete session.");
+    private static void migrateAndValidate(FileState state) {
+        if (state.schemaVersion > SCHEMA_VERSION) {
+            throw new JsonParseException("The cache was written by a newer Integrated IDE version.");
+        }
+        boolean changed = state.schemaVersion != SCHEMA_VERSION;
+        state.schemaVersion = SCHEMA_VERSION;
+        Iterator<Map.Entry<String, SavedSession>> sessions = state.sessions.entrySet().iterator();
+        while (sessions.hasNext()) {
+            Map.Entry<String, SavedSession> entry = sessions.next();
+            if (entry.getKey() == null || !valid(entry.getValue())) {
+                LOGGER.warn("Integrated IDE ignored one invalid Novel session cache entry.");
+                sessions.remove();
+                changed = true;
             }
-            for (NovelCompilationCache.CachedNode node : entry.getValue().nodes) {
-                if (node == null || node.fingerprint == null || node.fingerprint.isBlank() || node.variableCardId < -1
-                        || node.inputFingerprints == null) {
-                    throw new JsonParseException("The cache contains an invalid graph node.");
-                }
+        }
+        if (changed) {
+            markDirty();
+        }
+    }
+
+    private static boolean valid(SavedSession session) {
+        if (session == null || session.nodes == null) {
+            return false;
+        }
+        for (NovelCompilationCache.CachedNode node : session.nodes) {
+            if (node == null || node.fingerprint == null || node.fingerprint.isBlank() || node.variableCardId < -1) {
+                return false;
             }
+        }
+        return true;
+    }
+
+    private static void preserveUnreadableCache(Path source) {
+        if (!Files.exists(source)) {
+            return;
+        }
+        Path preserved = source.resolveSibling(source.getFileName() + ".invalid-" + System.currentTimeMillis());
+        try {
+            Files.copy(source, preserved, StandardCopyOption.COPY_ATTRIBUTES);
+        } catch (IOException backupError) {
+            LOGGER.warn("Integrated IDE could not preserve the unreadable Novel session cache.", backupError);
         }
     }
 
@@ -156,7 +190,7 @@ final class NovelSessionStore {
         }
 
         NovelCompilationCache.Reconciliation reconcile(ExpressionCompiler.Compilation compilation) {
-            return NovelCompilationCache.reconcile(compilation, saved.nodes == null ? List.of() : saved.nodes);
+            return NovelCompilationCache.reconcile(compilation, saved.nodes);
         }
 
         void commit(ExpressionCompiler.Compilation compilation, NovelCompilationCache.Reconciliation reconciliation,
@@ -167,6 +201,7 @@ final class NovelSessionStore {
     }
 
     private static final class FileState {
+        int schemaVersion = SCHEMA_VERSION;
         Map<String, SavedSession> sessions = new LinkedHashMap<>();
     }
 

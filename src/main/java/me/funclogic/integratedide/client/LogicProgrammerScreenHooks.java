@@ -27,7 +27,14 @@ public final class LogicProgrammerScreenHooks {
         }
         int guiLeft = programmer.getGuiLeft();
         int guiTop = programmer.getGuiTop();
-        NovelEditorOverlay overlay = new NovelEditorOverlay(programmer, menu, guiLeft, guiTop);
+        NovelEditorOverlay overlay;
+        try {
+            overlay = new NovelEditorOverlay(programmer, menu, guiLeft, guiTop);
+        } catch (IllegalStateException error) {
+            LOGGER.warn("Integrated IDE did not attach to an unsupported Logic Programmer menu layout: {}",
+                    error.getMessage());
+            return;
+        }
         OVERLAYS.put(programmer, overlay);
 
         event.addListener(overlay.panel());

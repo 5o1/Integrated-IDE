@@ -5,6 +5,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import org.cyclops.integrateddynamics.api.evaluate.variable.ValueDeseralizationContext;
+import org.cyclops.integrateddynamics.api.evaluate.variable.IValueType;
 import org.cyclops.integrateddynamics.api.item.IVariableFacade;
 import org.cyclops.integrateddynamics.core.evaluate.variable.ValueTypes;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
@@ -49,11 +50,11 @@ final class CardInventory {
             return null;
         }
         Identifier expectedId = Identifier.tryParse(expectedTypeId);
-        Object expectedType = expectedId == null ? null : ValueTypes.REGISTRY.getValueType(expectedId);
+        IValueType<?> expectedType = expectedId == null ? null : ValueTypes.REGISTRY.getValueType(expectedId);
         for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
             IVariableFacade facade = variableFacade(stack);
             if (facade != null && facade.isValid() && facade.getId() == variableCardId
-                    && (expectedType == null || expectedType.equals(facade.getOutputType()))) {
+                    && matchesExpectedType(facade.getOutputType(), expectedType)) {
                 return stack;
             }
         }
@@ -94,6 +95,10 @@ final class CardInventory {
     static boolean isBlankVariable(ItemStack stack) {
         IVariableFacade facade = variableFacade(stack);
         return facade != null && !facade.isValid();
+    }
+
+    static boolean matchesExpectedType(IValueType<?> actualType, IValueType<?> expectedType) {
+        return expectedType == null || (actualType != null && expectedType.correspondsTo(actualType));
     }
 
     private static IVariableFacade variableFacade(ItemStack stack) {

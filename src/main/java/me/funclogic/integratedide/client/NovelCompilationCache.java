@@ -119,10 +119,7 @@ final class NovelCompilationCache {
             } else {
                 id = cardIds.getOrDefault(step.id(), -1);
             }
-            List<String> inputFingerprints = step.inputs().stream()
-                    .map(reconciliation::fingerprint)
-                    .toList();
-            snapshot.add(new CachedNode(reconciliation.fingerprint(step.id()), id, inputFingerprints));
+            snapshot.add(new CachedNode(reconciliation.fingerprint(step.id()), id));
         }
         return snapshot;
     }
@@ -170,15 +167,12 @@ final class NovelCompilationCache {
     static final class CachedNode {
         String fingerprint;
         int variableCardId;
-        List<String> inputFingerprints;
-
         CachedNode() {
         }
 
-        CachedNode(String fingerprint, int variableCardId, List<String> inputFingerprints) {
+        CachedNode(String fingerprint, int variableCardId) {
             this.fingerprint = fingerprint;
             this.variableCardId = variableCardId;
-            this.inputFingerprints = List.copyOf(inputFingerprints);
         }
     }
 

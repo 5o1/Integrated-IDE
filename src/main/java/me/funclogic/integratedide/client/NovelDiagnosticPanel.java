@@ -23,7 +23,8 @@ final class NovelDiagnosticPanel {
     private final int right;
     private final int top;
     private final int bottom;
-    private NovelDiagnostic diagnostic = NovelDiagnostic.info("\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210");
+    private NovelDiagnostic diagnostic = NovelDiagnostic.info(Component.translatable("integratedide.diagnostic.initial",
+            IntegratedIdeKeyMappings.COMPILE_NOVEL.getTranslatedKeyMessage()));
     private int scrollLine;
 
     NovelDiagnosticPanel(Font font, int workX, int workY, int workHeight, int nativeCardSlotX) {
@@ -108,7 +109,7 @@ final class NovelDiagnosticPanel {
     }
 
     private List<FormattedCharSequence> lines() {
-        return font.split(Component.literal(diagnostic.text()), textWidth());
+        return font.split(diagnostic.text(), textWidth());
     }
 
     private int maxScroll() {

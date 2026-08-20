@@ -29,6 +29,21 @@ public final class ExpressionCompiler {
 
         TypeInfo literalType(LiteralKind kind, String value, TypeInfo expectedType);
 
+        /**
+         * Selects the ordinary Logic Programmer element for a literal. This
+         * keeps literal representation semantic instead of inferring it from
+         * a human-readable value-type name.
+         */
+        default StepKind literalStepKind(LiteralKind kind, TypeInfo type) {
+            return switch (kind) {
+                case STRING, INTEGER, DECIMAL -> StepKind.STATIC_TEXT;
+                case MOD -> StepKind.STATIC_MOD;
+                case BOOLEAN -> StepKind.STATIC_BOOLEAN;
+                case ITEM -> StepKind.STATIC_ITEM;
+                case TAG -> StepKind.STATIC_TAG;
+            };
+        }
+
         boolean isAssignable(TypeInfo actualType, TypeInfo expectedType);
     }
 

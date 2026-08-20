@@ -142,15 +142,9 @@ final class NovelEditorAnnotations {
         }
         String source = editor.getValue();
         int position = Math.min(compilation.errorPosition(), source.length());
-        int lineStart = source.lastIndexOf('\n', position - 1) + 1;
-        int line = 0;
-        for (int index = 0; index < lineStart; index++) {
-            if (source.charAt(index) == '\n') {
-                line++;
-            }
-        }
-        int x = editor.getX() + padding + font.width(source.substring(lineStart, position));
-        int y = editor.getY() + padding + line * font.lineHeight - (int) editor.scrollAmount();
+        TextLocation location = textLocation(position);
+        int x = location.x();
+        int y = location.y();
         if (y >= editor.getY() && y < editor.getBottom()) {
             graphics.fill(x, y + font.lineHeight - 1, x + 3, y + font.lineHeight, 0xFFE06060);
         }
@@ -167,14 +161,15 @@ final class NovelEditorAnnotations {
         if (relativeY < 0) {
             return;
         }
-        int lineStart = sourceLineStart(source, relativeY / font.lineHeight);
-        if (lineStart < 0) {
+        List<CompletionEditorAccess.VisualLine> lines = CompletionEditorAccess.visualLines(editor);
+        int visualLine = relativeY / font.lineHeight;
+        if (visualLine < 0 || visualLine >= lines.size()) {
             return;
         }
-        int newline = source.indexOf('\n', lineStart);
-        int lineEnd = newline < 0 ? source.length() : newline;
+        int lineStart = lines.get(visualLine).sourceStart();
+        int lineEnd = lines.get(visualLine).sourceEnd();
         ExpressionCompiler.StatementRoot root = compilation.statementRoots().stream()
-                .filter(candidate -> candidate.sourceStart() >= lineStart && candidate.sourceStart() < lineEnd)
+                .filter(candidate -> candidate.sourceStart() < lineEnd && candidate.sourceEnd() > lineStart)
                 .findFirst()
                 .orElse(null);
         if (root == null) {
@@ -221,63 +216,66 @@ final class NovelEditorAnnotations {
     }
 
     private void renderTextRange(GuiGraphicsExtractor graphics, int start, int end, int color) {
-        TextLocation location = textLocation(start);
         String source = editor.getValue();
-        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
-        int lineEnd = source.indexOf('\n', location.position());
-        if (lineEnd < 0) {
-            lineEnd = source.length();
-        }
-        if (location.y() >= editor.getY() && location.y() < editor.getBottom() && lineEnd >= safeEnd) {
-            graphics.text(font, source.substring(location.position(), safeEnd), location.x(), location.y(), color, false);
+        int safeStart = Math.max(0, Math.min(start, source.length()));
+        int safeEnd = Math.max(safeStart, Math.min(end, source.length()));
+        List<CompletionEditorAccess.VisualLine> lines = CompletionEditorAccess.visualLines(editor);
+        for (int index = 0; index < lines.size(); index++) {
+            int lineStart = lines.get(index).sourceStart();
+            int lineEnd = lines.get(index).sourceEnd();
+            int segmentStart = Math.max(safeStart, lineStart);
+            int segmentEnd = Math.min(safeEnd, lineEnd);
+            if (segmentStart >= segmentEnd) {
+                continue;
+            }
+            TextLocation location = textLocation(segmentStart);
+            if (location.y() >= editor.getY() && location.y() < editor.getBottom()) {
+                graphics.text(font, source.substring(segmentStart, segmentEnd), location.x(), location.y(), color, false);
+            }
         }
     }
 
     private void renderRangeUnderline(GuiGraphicsExtractor graphics, int start, int end, int color) {
-        TextLocation location = textLocation(start);
         String source = editor.getValue();
-        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
-        int lineEnd = source.indexOf('\n', location.position());
-        if (lineEnd < 0) {
-            lineEnd = source.length();
-        }
-        if (location.y() >= editor.getY() && location.y() < editor.getBottom()) {
-            int width = font.width(source.substring(location.position(), Math.min(safeEnd, lineEnd)));
-            graphics.fill(location.x(), location.y() + font.lineHeight - 1, location.x() + Math.max(3, width),
-                    location.y() + font.lineHeight, color);
+        int safeStart = Math.max(0, Math.min(start, source.length()));
+        int safeEnd = Math.max(safeStart, Math.min(end, source.length()));
+        List<CompletionEditorAccess.VisualLine> lines = CompletionEditorAccess.visualLines(editor);
+        for (int index = 0; index < lines.size(); index++) {
+            int lineStart = lines.get(index).sourceStart();
+            int lineEnd = lines.get(index).sourceEnd();
+            int segmentStart = Math.max(safeStart, lineStart);
+            int segmentEnd = Math.min(safeEnd, lineEnd);
+            if (segmentStart >= segmentEnd) {
+                continue;
+            }
+            TextLocation location = textLocation(segmentStart);
+            if (location.y() >= editor.getY() && location.y() < editor.getBottom()) {
+                int width = font.width(source.substring(segmentStart, segmentEnd));
+                graphics.fill(location.x(), location.y() + font.lineHeight - 1, location.x() + Math.max(3, width),
+                        location.y() + font.lineHeight, color);
+            }
         }
     }
 
     private TextLocation textLocation(int position) {
         String source = editor.getValue();
         int safePosition = Math.max(0, Math.min(position, source.length()));
-        int lineStart = source.lastIndexOf('\n', safePosition - 1) + 1;
-        int line = 0;
-        for (int index = 0; index < lineStart; index++) {
-            if (source.charAt(index) == '\n') {
-                line++;
+        List<CompletionEditorAccess.VisualLine> lines = CompletionEditorAccess.visualLines(editor);
+        CompletionEditorAccess.VisualLine line = lines.getFirst();
+        for (CompletionEditorAccess.VisualLine candidate : lines) {
+            if (candidate.sourceStart() > safePosition) {
+                break;
             }
+            line = candidate;
         }
-        int x = editor.getX() + padding + font.width(source.substring(lineStart, safePosition));
-        int y = editor.getY() + padding + line * font.lineHeight - (int) editor.scrollAmount();
+        int x = editor.getX() + padding + font.width(source.substring(line.sourceStart(), safePosition));
+        int y = editor.getY() + padding + line.visualIndex() * font.lineHeight - (int) editor.scrollAmount();
         return new TextLocation(safePosition, x, y);
     }
 
     private boolean insideEditor(double mouseX, double mouseY) {
         return mouseX >= editor.getX() && mouseX < editor.getRight()
                 && mouseY >= editor.getY() && mouseY < editor.getBottom();
-    }
-
-    private static int sourceLineStart(String source, int line) {
-        int start = 0;
-        for (int current = 0; current < line; current++) {
-            int newline = source.indexOf('\n', start);
-            if (newline < 0) {
-                return -1;
-            }
-            start = newline + 1;
-        }
-        return start;
     }
 
     private record TextLocation(int position, int x, int y) {

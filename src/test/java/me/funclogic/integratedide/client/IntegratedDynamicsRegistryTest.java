@@ -71,4 +71,32 @@ class IntegratedDynamicsRegistryTest {
         }
         throw new AssertionError("The installed Integrated Dynamics registry did not expose a category-scoped item operator.");
     }
+
+    @Test
+    void derivesItemAndFluidLiteralCardsFromRegistryTypesRatherThanDisplayNames() {
+        LogicProgrammerCatalog catalog = LogicProgrammerCatalog.create();
+
+        var item = catalog.compile("\"$minecraft:cobblestone\"");
+        var fluid = catalog.compile("\"$minecraft:water\"");
+        var missing = catalog.compile("\"$integratedide:not_a_registered_resource\"");
+
+        assertTrue(item.valid(), item.message());
+        assertEquals(ExpressionCompiler.StepKind.STATIC_ITEM, item.steps().getFirst().kind());
+        assertEquals(ValueTypes.OBJECT_ITEMSTACK.getUniqueName().toString(), item.steps().getFirst().outputTypeId());
+
+        assertTrue(fluid.valid(), fluid.message());
+        assertEquals(ExpressionCompiler.StepKind.STATIC_FLUID, fluid.steps().getFirst().kind());
+        assertEquals(ValueTypes.OBJECT_FLUIDSTACK.getUniqueName().toString(), fluid.steps().getFirst().outputTypeId());
+
+        assertFalse(missing.valid(), "An unknown resource must not pretend to be an item or fluid at compile time.");
+    }
+
+    @Test
+    void neverReturnsMoreCandidatesThanThePopupCanDisplay() {
+        LogicProgrammerCatalog catalog = LogicProgrammerCatalog.create();
+        String source = "any";
+
+        assertTrue(catalog.completions(source, source.length(), null, false).size()
+                <= LogicProgrammerCatalog.MAX_COMPLETIONS);
+    }
 }

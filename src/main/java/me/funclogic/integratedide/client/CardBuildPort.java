@@ -11,6 +11,9 @@ import net.minecraft.world.item.ItemStack;
 interface CardBuildPort {
     boolean isCurrent();
 
+    /** A newly synchronized server-side programmer error, or {@code null}. */
+    String serverFailure();
+
     void select(ExpressionCompiler.CardStep step);
 
     void configure(ExpressionCompiler.CardStep step);

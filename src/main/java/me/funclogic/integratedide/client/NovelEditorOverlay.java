@@ -22,26 +22,23 @@ import org.lwjgl.glfw.GLFW;
  * remain visible and continue to use Integrated Dynamics' normal styling.
  */
 final class NovelEditorOverlay {
-    // The right-side element configuration area. The left selector/filter and
-    // the player inventory deliberately remain outside this rectangle.
-    private static final int WORK_X = 88;
-    private static final int WORK_Y = 18;
-    private static final int WORK_WIDTH = 162;
-    private static final int WORK_HEIGHT = 108;
     private static final int STATUS_HEIGHT = 32;
     private static final int EDITOR_PADDING = 4;
     private static final int MAX_SOURCE_CHARACTERS = 8_192;
-    // This is the original Logic Programmer's write-card slot. Keeping these
-    // coordinates makes Novel mode visually continuous with vanilla mode.
-    private static final int NATIVE_CARD_SLOT_X = 232;
-    private static final int NATIVE_CARD_SLOT_Y = 110;
-    private static final int CARD_SLOT_SIZE = 18;
+    private static final int MODE_TAB_WIDTH = 57;
+    private static final int MODE_TAB_HEIGHT = 15;
+    private static final int MODE_TAB_RIGHT_GUTTER = 6;
 
     private final ContainerScreenLogicProgrammerBase<?> screen;
     private final ContainerLogicProgrammerBase menu;
     private final Font font;
     private final int workX;
     private final int workY;
+    private final int workWidth;
+    private final int workHeight;
+    private final int nativeCardSlotX;
+    private final int nativeCardSlotY;
+    private final int cardSlotSize;
     private final MultiLineEditBox editor;
     private final PanelWidget panel;
     private final ForegroundWidget foreground;
@@ -66,6 +63,7 @@ final class NovelEditorOverlay {
     private boolean statusDragging;
     private boolean completionExplicitlyRequested;
     private boolean constrainingSource;
+    private String acceptedSource;
     private boolean buildCommitted;
     private int activeCreatedCards;
     private String rebuildConfirmationSource;
@@ -76,31 +74,41 @@ final class NovelEditorOverlay {
         this.screen = screen;
         this.menu = menu;
         this.font = screen.getFont();
-        this.workX = guiLeft + WORK_X;
-        this.workY = guiTop + WORK_Y;
+        var writeSlot = LogicProgrammerMenuLayout.writeSlotView(menu);
+        this.nativeCardSlotX = guiLeft + writeSlot.x;
+        this.nativeCardSlotY = guiTop + writeSlot.y;
+        this.cardSlotSize = ContainerScreenLogicProgrammerBase.BOX_HEIGHT;
+        // Use the Logic Programmer's published configuration origin and the
+        // live write-slot position. This keeps Novel mode aligned if the base
+        // screen moves either region instead of embedding a duplicate layout.
+        this.workX = guiLeft + ContainerLogicProgrammerBase.BASE_X;
+        this.workY = guiTop + ContainerLogicProgrammerBase.BASE_Y;
+        this.workWidth = nativeCardSlotX + cardSlotSize - workX;
+        this.workHeight = nativeCardSlotY + cardSlotSize - workY;
         this.panel = new PanelWidget();
         this.foreground = new ForegroundWidget();
-        this.diagnostics = new NovelDiagnosticPanel(font, workX, workY, WORK_HEIGHT, nativeCardSlotX());
-        this.modeTab = new ModeTabWidget(guiLeft + 199, Math.max(0, guiTop - 15));
+        this.diagnostics = new NovelDiagnosticPanel(font, workX, workY, workHeight, nativeCardSlotX());
+        this.modeTab = new ModeTabWidget(workX + workWidth + MODE_TAB_RIGHT_GUTTER - MODE_TAB_WIDTH,
+                Math.max(0, workY - ContainerLogicProgrammerBase.BASE_Y - MODE_TAB_HEIGHT));
         this.editor = MultiLineEditBox.builder()
                 .setX(workX + EDITOR_PADDING)
                 .setY(workY + EDITOR_PADDING)
                 .setPlaceholder(Component.empty())
                 .setShowBackground(false)
-                .build(font, WORK_WIDTH - EDITOR_PADDING * 2, WORK_HEIGHT - STATUS_HEIGHT - EDITOR_PADDING * 2,
+                .build(font, workWidth - EDITOR_PADDING * 2, workHeight - STATUS_HEIGHT - EDITOR_PADDING * 2,
                         Component.translatable("integratedide.title"));
-        this.editor.setLineLimit(128);
         this.popup = new NovelCompletionPopup(font, editor, workY + 1,
-                workY + WORK_HEIGHT - STATUS_HEIGHT - 2, EDITOR_PADDING, 5);
+                workY + workHeight - STATUS_HEIGHT - 2, EDITOR_PADDING, LogicProgrammerCatalog.MAX_COMPLETIONS);
         this.annotations = new NovelEditorAnnotations(font, editor, EDITOR_PADDING, MAX_SOURCE_CHARACTERS,
-                nativeCardSlotX(), nativeCardSlotY(), CARD_SLOT_SIZE);
+                nativeCardSlotX(), nativeCardSlotY(), cardSlotSize);
         this.catalog = LogicProgrammerCatalog.create();
         this.session = NovelSessionStore.current();
         this.editor.setValueListener(this::editorValueChanged);
         this.completionAvailable = CompletionEditorAccess.setCursorListener(editor, this::cursorChanged);
-        this.editor.setValue(session.source());
+        this.acceptedSource = session.source();
+        this.editor.setValue(acceptedSource);
         if (!completionAvailable) {
-            setError("\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002");
+            setError(Component.translatable("integratedide.error.completion_unavailable"));
         }
         setNovelMode(false);
     }
@@ -169,9 +177,10 @@ final class NovelEditorOverlay {
         }
         if (buildRunning()) {
             if (IntegratedIdeKeyMappings.matchesCompile(event)) {
-                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff1a" + driver.status());
+                setInfo(driver.statusComponent());
             } else if (event.isEscape()) {
-                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u65e0\u6cd5\u5173\u95ed Novel \u6a21\u5f0f\u3002");
+                driver.cancel();
+                setNovelMode(false);
             }
             return true;
         }
@@ -228,7 +237,7 @@ final class NovelEditorOverlay {
             return true;
         }
         if (insideNativeCardSlot(event.x(), event.y())) {
-            setInfo("\u961f\u5217\u4f7f\u7528\u80cc\u5305\u4e2d\u7684\u7a7a\u767d Variable Card\u3002");
+            setInfo(Component.translatable("integratedide.info.blank_card_queue"));
             return true;
         }
         if (diagnostics.contains(event.x(), event.y())) {
@@ -320,10 +329,12 @@ final class NovelEditorOverlay {
         }
         if (source.length() > MAX_SOURCE_CHARACTERS) {
             constrainingSource = true;
-            editor.setValue(source.substring(0, MAX_SOURCE_CHARACTERS));
+            editor.setValue(acceptedSource);
             constrainingSource = false;
-            source = editor.getValue();
+            setError(Component.translatable("integratedide.error.source_too_long", MAX_SOURCE_CHARACTERS));
+            return;
         }
+        acceptedSource = source;
         session.setSource(source);
         rebuildConfirmationSource = null;
         missingCachedNodes = List.of();
@@ -349,8 +360,9 @@ final class NovelEditorOverlay {
     void tick() {
         if (buildRunning()) {
             driver.tick();
-            setDiagnostic(driver.isFailed() ? NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status())
-                    : NovelDiagnostic.info(driver.status()));
+            setDiagnostic(driver.isFailed()
+                    ? NovelDiagnostic.error(Component.translatable("integratedide.error.build_failed", driver.statusComponent()))
+                    : NovelDiagnostic.info(driver.statusComponent()));
             if (!buildRunning()) {
                 editor.active = novelMode;
             }
@@ -364,7 +376,7 @@ final class NovelEditorOverlay {
         // second invocation can reuse its Variable Cards.
         finalizeCompletedBuild();
         if (buildRunning()) {
-            setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff1a" + driver.status());
+            setInfo(driver.statusComponent());
             return;
         }
         compilation = catalog.compile(editor.getValue());
@@ -389,7 +401,7 @@ final class NovelEditorOverlay {
         previewReconciliation = session.reconcile(compilation);
         buildCommitted = true;
         NovelSessionStore.flush();
-        setInfo("\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002");
+        setInfo(Component.translatable("integratedide.info.build_committed", activeCreatedCards));
     }
 
     private void compileAndBuildFromCache() {
@@ -400,14 +412,14 @@ final class NovelEditorOverlay {
                 player, forceRebuild);
         if (selection.hasMissingExternal()) {
             NovelCompilationCache.MissingNode missing = selection.missingExternal();
-            setError("构建失败\n外部变量卡 {" + missing.variableCardId() + "} 不在背包中，或类型不符合当前参数。");
+            setError(Component.translatable("integratedide.error.missing_external", missing.variableCardId()));
             return;
         }
         if (selection.needsRebuildConfirmation()) {
             missingCachedNodes = selection.missingCachedNodes();
             rebuildConfirmationSource = editor.getValue();
-            setError("构建需要确认\n缺少 " + missingCachedNodes.size()
-                    + " 个缓存变量卡；再次按 Ctrl+Enter 将重编译它们及其依赖者。");
+            setError(Component.translatable("integratedide.error.rebuild_confirmation", missingCachedNodes.size(),
+                    IntegratedIdeKeyMappings.COMPILE_NOVEL.getTranslatedKeyMessage()));
             return;
         }
         missingCachedNodes = List.of();
@@ -416,17 +428,17 @@ final class NovelEditorOverlay {
         int available = CardBuildDriver.countBlankVariableCards(player);
         int freeSlots = CardInventory.countEmptyPlayerSlots(player);
         if (available < required) {
-            setError("构建失败\n空白 Variable Card 不足：需要 " + required + "，背包中有 " + available + "。");
+            setError(Component.translatable("integratedide.error.insufficient_blank_cards", required, available));
             return;
         }
         if (freeSlots < required) {
-            setError("构建失败\n背包空槽不足：需要 " + required + "，剩余 " + freeSlots + "。");
+            setError(Component.translatable("integratedide.error.insufficient_inventory_slots", required, freeSlots));
             return;
         }
         if (required == 0) {
             session.commit(compilation, activeReconciliation, selection.availableCards());
             previewReconciliation = session.reconcile(compilation);
-            setInfo("无需新建变量卡，已复用缓存图。");
+            setInfo(Component.translatable("integratedide.info.cache_reused"));
             return;
         }
         driver = new CardBuildDriver(menu, selection.stepsToBuild(), selection.availableCards());
@@ -435,7 +447,8 @@ final class NovelEditorOverlay {
         driver.start();
         editor.active = !buildRunning();
         if (driver.isFailed()) {
-            setDiagnostic(NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status()));
+            setDiagnostic(NovelDiagnostic.error(
+                    Component.translatable("integratedide.error.build_failed", driver.statusComponent())));
         }
         return;
     }
@@ -445,14 +458,20 @@ final class NovelEditorOverlay {
             setDiagnostic(NovelDiagnostic.compilation(checked));
             return;
         }
-        setDiagnostic(NovelDiagnostic.runtime(checked, RuntimeExpressionValidator.validate(checked)));
+        RuntimeExpressionValidator.Result runtime = RuntimeExpressionValidator.validate(checked);
+        if (!completionAvailable) {
+            String prefix = runtime.valid() ? checked.message() + "  " + runtime.message() : runtime.message();
+            setError(Component.translatable("integratedide.error.completion_unavailable_after", prefix));
+            return;
+        }
+        setDiagnostic(NovelDiagnostic.runtime(checked, runtime));
     }
 
-    private void setInfo(String message) {
+    private void setInfo(Component message) {
         setDiagnostic(NovelDiagnostic.info(message));
     }
 
-    private void setError(String message) {
+    private void setError(Component message) {
         setDiagnostic(NovelDiagnostic.error(message));
     }
 
@@ -498,7 +517,7 @@ final class NovelEditorOverlay {
         if (!CompletionEditorAccess.replaceCurrentToken(editor, completions.get(index).insertion())) {
             completions = List.of();
             popupMode = NovelCompletionPopup.Mode.NONE;
-            setError("\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002");
+            setError(Component.translatable("integratedide.error.completion_unavailable"));
             return;
         }
         refreshCompletions();
@@ -531,34 +550,34 @@ final class NovelEditorOverlay {
     private boolean insideNativeCardSlot(double mouseX, double mouseY) {
         int slotX = nativeCardSlotX();
         int slotY = nativeCardSlotY();
-        return mouseX >= slotX && mouseX < slotX + CARD_SLOT_SIZE
-                && mouseY >= slotY && mouseY < slotY + CARD_SLOT_SIZE;
+        return mouseX >= slotX && mouseX < slotX + cardSlotSize
+                && mouseY >= slotY && mouseY < slotY + cardSlotSize;
     }
 
     private int nativeCardSlotX() {
-        return workX + NATIVE_CARD_SLOT_X - WORK_X;
+        return nativeCardSlotX;
     }
 
     private int nativeCardSlotY() {
-        return workY + NATIVE_CARD_SLOT_Y - WORK_Y;
+        return nativeCardSlotY;
     }
 
     private boolean insideWorkArea(double mouseX, double mouseY) {
-        return mouseX >= workX && mouseX < workX + WORK_WIDTH && mouseY >= workY && mouseY < workY + WORK_HEIGHT;
+        return mouseX >= workX && mouseX < workX + workWidth && mouseY >= workY && mouseY < workY + workHeight;
     }
 
     private void renderPanel(GuiGraphicsExtractor graphics) {
         int slotX = nativeCardSlotX();
         int slotY = nativeCardSlotY();
-        int panelRight = workX + WORK_WIDTH;
-        int panelBottom = workY + WORK_HEIGHT;
+        int panelRight = workX + workWidth;
+        int panelBottom = workY + workHeight;
         // Draw around, rather than over, the native variable-card slot. The
         // slot itself was already rendered by the base container screen.
         graphics.fill(workX, workY, panelRight, slotY, 0xFF161616);
         graphics.fill(workX, slotY, slotX, panelBottom, 0xFF161616);
-        graphics.fill(slotX + CARD_SLOT_SIZE, slotY, panelRight, panelBottom, 0xFF161616);
-        graphics.fill(slotX, slotY + CARD_SLOT_SIZE, panelRight, panelBottom, 0xFF161616);
-        graphics.outline(workX, workY, WORK_WIDTH, WORK_HEIGHT, 0xFF777777);
+        graphics.fill(slotX + cardSlotSize, slotY, panelRight, panelBottom, 0xFF161616);
+        graphics.fill(slotX, slotY + cardSlotSize, panelRight, panelBottom, 0xFF161616);
+        graphics.outline(workX, workY, workWidth, workHeight, 0xFF777777);
         diagnostics.renderBackground(graphics);
         annotations.renderCounterBackground(graphics);
         // Draw the label before the editor's widget render. Its dark backing
@@ -569,7 +588,7 @@ final class NovelEditorOverlay {
 
     private final class PanelWidget extends AbstractWidget {
         PanelWidget() {
-            super(workX, workY, WORK_WIDTH, WORK_HEIGHT, Component.empty());
+            super(workX, workY, workWidth, workHeight, Component.empty());
         }
 
         @Override
@@ -584,7 +603,7 @@ final class NovelEditorOverlay {
 
     private final class ForegroundWidget extends AbstractWidget {
         ForegroundWidget() {
-            super(workX, workY, WORK_WIDTH, WORK_HEIGHT, Component.empty());
+            super(workX, workY, workWidth, workHeight, Component.empty());
         }
 
         @Override
@@ -599,13 +618,14 @@ final class NovelEditorOverlay {
 
     private final class ModeTabWidget extends AbstractWidget {
         ModeTabWidget(int x, int y) {
-            super(x, y, 57, 15, Component.literal("Novel"));
+            super(x, y, MODE_TAB_WIDTH, MODE_TAB_HEIGHT, Component.translatable("integratedide.mode.novel"));
         }
 
         @Override
         public void onClick(MouseButtonEvent event, boolean doubleClick) {
             if (buildRunning()) {
-                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u6682\u65f6\u4e0d\u80fd\u5207\u6362\u6a21\u5f0f\u3002");
+                driver.cancel();
+                setNovelMode(false);
                 return;
             }
             setNovelMode(!novelMode);

@@ -31,10 +31,10 @@ public final class IntegratedIdeKeyMappings {
     }
 
     static boolean matchesCompile(KeyEvent event) {
-        return event.hasControlDown() && COMPILE_NOVEL.matches(event);
+        return COMPILE_NOVEL.matches(event);
     }
 
     static boolean matchesCompletion(KeyEvent event) {
-        return event.hasControlDown() && REQUEST_COMPLETION.matches(event);
+        return REQUEST_COMPLETION.matches(event);
     }
 }

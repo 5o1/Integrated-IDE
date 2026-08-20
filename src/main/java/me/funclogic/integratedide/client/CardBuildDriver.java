@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import java.util.List;
 import java.util.Map;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
@@ -23,7 +24,7 @@ public final class CardBuildDriver {
     private int stepIndex;
     private int inputIndex;
     private Phase phase = Phase.IDLE;
-    private String status = "\u7b49\u5f85\u5f00\u59cb";
+    private Component status = Component.translatable("integratedide.build.waiting");
 
     public CardBuildDriver(ContainerLogicProgrammerBase menu, List<ExpressionCompiler.CardStep> steps,
                            Map<String, ItemStack> existingCards) {
@@ -41,15 +42,15 @@ public final class CardBuildDriver {
 
     public void start() {
         if (!port.isCurrent()) {
-            fail("\u903b\u8f91\u7f16\u7a0b\u5668\u5df2\u5173\u95ed\u6216\u5207\u6362\uff0c\u672a\u5f00\u59cb\u751f\u6210");
+            fail(Component.translatable("integratedide.build.not_started"));
             return;
         }
         phase = Phase.SELECT;
-        status = "\u51c6\u5907\u751f\u6210 " + steps.size() + " \u5f20\u53d8\u91cf\u5361\u2026";
+        status = Component.translatable("integratedide.build.preparing", steps.size());
     }
 
     public boolean isRunning() {
-        return phase != Phase.IDLE && phase != Phase.COMPLETE && phase != Phase.FAILED;
+        return phase != Phase.IDLE && phase != Phase.COMPLETE && phase != Phase.CANCELLED && phase != Phase.FAILED;
     }
 
     public boolean isFailed() {
@@ -60,11 +61,28 @@ public final class CardBuildDriver {
         return phase == Phase.COMPLETE;
     }
 
+    /**
+     * Stops automation without sending any more inventory clicks. Temporary
+     * cards stay in the vanilla programmer so the player can recover them
+     * visibly instead of an opaque client-side rollback guessing their state.
+     */
+    public void cancel() {
+        if (!isRunning()) {
+            return;
+        }
+        phase = Phase.CANCELLED;
+        status = Component.translatable("integratedide.build.cancelled");
+    }
+
     public Map<String, ItemStack> producedCards() {
         return port.producedCards();
     }
 
     public String status() {
+        return status.getString();
+    }
+
+    Component statusComponent() {
         return status;
     }
 
@@ -79,7 +97,12 @@ public final class CardBuildDriver {
             return;
         }
         if (!port.isCurrent()) {
-            fail("\u903b\u8f91\u7f16\u7a0b\u5668\u5df2\u5173\u95ed\u6216\u5207\u6362\uff0c\u5df2\u505c\u6b62\u4ee5\u907f\u514d\u79fb\u52a8\u9519\u8bef\u7269\u54c1");
+            fail(Component.translatable("integratedide.build.menu_changed"));
+            return;
+        }
+        String serverFailure = port.serverFailure();
+        if (serverFailure != null) {
+            fail(Component.translatable("integratedide.build.server_rejected", serverFailure));
             return;
         }
         try {
@@ -96,8 +119,7 @@ public final class CardBuildDriver {
     private boolean advance() {
         if (stepIndex >= steps.size()) {
             phase = Phase.COMPLETE;
-            status = "\u5b8c\u6210\uff1a\u5df2\u751f\u6210 " + steps.size()
-                    + " \u5f20\u666e\u901a\u53d8\u91cf\u5361\u3002\u8bf7\u5c06\u4f9d\u8d56\u5361\u548c\u6700\u7ec8\u5361\u653e\u5165\u540c\u4e00 Variable Store\u3002";
+            status = Component.translatable("integratedide.build.complete", steps.size());
             return false;
         }
         ExpressionCompiler.CardStep step = steps.get(stepIndex);
@@ -145,8 +167,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputSlot(ExpressionCompiler.CardStep step) {
         if (!port.inputSlotReady(inputIndex)) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u521b\u5efa\u7b2c " + (inputIndex + 1)
-                    + " \u4e2a\u8f93\u5165\u69fd\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.input_slot", inputIndex + 1));
         }
         phase = Phase.PICK_INPUT;
         return true;
@@ -161,8 +182,7 @@ public final class CardBuildDriver {
     private boolean waitForInputHeld(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
         if (!port.inputHeld(input)) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u7b2c " + (inputIndex + 1)
-                    + " \u5f20\u8f93\u5165\u53d8\u91cf\u5361\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.input_held", inputIndex + 1));
         }
         phase = Phase.PLACE_INPUT;
         return true;
@@ -177,8 +197,7 @@ public final class CardBuildDriver {
     private boolean waitForInputPlaced(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
         if (!port.inputPlaced(inputIndex, input)) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u786e\u8ba4\u7b2c " + (inputIndex + 1)
-                    + " \u5f20\u8f93\u5165\u53d8\u91cf\u5361\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.input_placed", inputIndex + 1));
         }
         inputIndex++;
         phase = inputIndex < step.inputs().size() ? Phase.WAIT_INPUT_SLOT : Phase.PICK_BLANK;
@@ -193,7 +212,7 @@ public final class CardBuildDriver {
 
     private boolean waitForBlankHeld() {
         if (!port.blankHeld()) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u7a7a\u767d Variable Card\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.blank_held"));
         }
         phase = Phase.PLACE_BLANK;
         return true;
@@ -207,7 +226,7 @@ public final class CardBuildDriver {
 
     private boolean waitForOutputReady() {
         if (!port.outputReady()) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u5199\u5165\u53d8\u91cf\u5361\u8f93\u51fa\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.output_ready"));
         }
         phase = Phase.RETURN_REMAINDER;
         return true;
@@ -221,7 +240,7 @@ public final class CardBuildDriver {
 
     private boolean waitForRemainderReturned() {
         if (!port.blankRemainderReturned()) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u8fd4\u56de\u7a7a\u767d Variable Card \u4f59\u91cf\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.remainder"));
         }
         phase = Phase.STORE_OUTPUT;
         return true;
@@ -235,7 +254,7 @@ public final class CardBuildDriver {
 
     private boolean waitForOutputStored() {
         if (!port.outputStored()) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u65b0\u53d8\u91cf\u5361\u5230\u80cc\u5305\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.output_stored"));
         }
         phase = Phase.CONFIRM_OUTPUT;
         return true;
@@ -252,7 +271,7 @@ public final class CardBuildDriver {
         if (inputIndex >= step.inputs().size()) {
             stepIndex++;
             phase = Phase.SELECT;
-            status = "\u5df2\u751f\u6210 " + stepIndex + "/" + steps.size() + " \u5f20\u53d8\u91cf\u5361\u2026";
+            status = Component.translatable("integratedide.build.progress", stepIndex, steps.size());
             return true;
         }
         port.cleanupInput(inputIndex);
@@ -263,14 +282,14 @@ public final class CardBuildDriver {
     private boolean waitForInputReturned(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
         if (!port.inputReturned(inputIndex, input)) {
-            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u5f52\u8fd8\u8f93\u5165\u53d8\u91cf\u5361\u2026");
+            return waiting(Component.translatable("integratedide.build.wait.input_returned"));
         }
         inputIndex++;
         phase = Phase.CLEANUP_INPUT;
         return true;
     }
 
-    private boolean waiting(String message) {
+    private boolean waiting(Component message) {
         status = message;
         return false;
     }
@@ -280,16 +299,21 @@ public final class CardBuildDriver {
     }
 
     private void fail(String message) {
+        fail(Component.literal(message));
+    }
+
+    private void fail(Component message) {
         String step = steps.isEmpty() ? "none" : Integer.toString(Math.min(stepIndex + 1, steps.size()));
-        LOGGER.warn("Integrated IDE stopped card build at step {}/{} in {}: {}", step, steps.size(), phase, message);
+        LOGGER.warn("Integrated IDE stopped card build at step {}/{} in {}: {}", step, steps.size(), phase,
+                message.getString());
         phase = Phase.FAILED;
-        status = "\u5df2\u505c\u6b62\uff1a" + message;
+        status = Component.translatable("integratedide.build.stopped", message);
     }
 
     private enum Phase {
         IDLE, SELECT, CONFIGURE, WAIT_INPUT_SLOT, PICK_INPUT, WAIT_INPUT_HELD, PLACE_INPUT,
         WAIT_INPUT_PLACED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
         RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, STORE_OUTPUT, WAIT_OUTPUT_STORED, CONFIRM_OUTPUT,
-        CLEANUP_INPUT, WAIT_INPUT_RETURNED, COMPLETE, FAILED
+        CLEANUP_INPUT, WAIT_INPUT_RETURNED, COMPLETE, CANCELLED, FAILED
     }
 }

@@ -7,7 +7,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -30,14 +29,20 @@ import org.cyclops.integrateddynamics.core.evaluate.variable.ValueTypes;
  * is maintained by this mod.
  */
 public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog {
+    static final int MAX_COMPLETIONS = 5;
     /**
      * The optional operator metadata lets the UI show an accurate signature
      * without keeping a second, hand-written function table.
      */
     public record Completion(String insertion, String detail, ExpressionCompiler.FunctionInfo function,
-                             int receiverArguments) {
+                             int receiverArguments, ExpressionCompiler.TypeInfo outputType) {
         public Completion(String insertion, String detail) {
-            this(insertion, detail, null, 0);
+            this(insertion, detail, null, 0, null);
+        }
+
+        public Completion(String insertion, String detail, ExpressionCompiler.FunctionInfo function,
+                          int receiverArguments) {
+            this(insertion, detail, function, receiverArguments, function == null ? null : function.outputType());
         }
     }
 
@@ -52,7 +57,6 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
 
     private final Map<String, IValueType<?>> valuesById = new LinkedHashMap<>();
     private final Map<String, ExpressionCompiler.TypeInfo> typesById = new LinkedHashMap<>();
-    private final Map<String, ExpressionCompiler.TypeInfo> typesByName = new LinkedHashMap<>();
     private final Map<String, ExpressionCompiler.FunctionInfo> globals = new LinkedHashMap<>();
     private final Map<String, List<String>> globalFormsByMemberName = new LinkedHashMap<>();
     private final Map<String, Map<String, ExpressionCompiler.FunctionInfo>> members = new LinkedHashMap<>();
@@ -66,7 +70,6 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                     type.getTypeName());
             valuesById.put(info.id(), type);
             typesById.put(info.id(), info);
-            typesByName.putIfAbsent(type.getTypeName().toLowerCase(Locale.ROOT), info);
         }
         for (Map.Entry<String, IOperator> entry : Operators.REGISTRY.getGlobalInteractOperators().entrySet()) {
             IOperator operator = entry.getValue();
@@ -122,13 +125,22 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     public ExpressionCompiler.TypeInfo literalType(ExpressionCompiler.LiteralKind kind, String value,
                                                     ExpressionCompiler.TypeInfo expectedType) {
         return switch (kind) {
-            case STRING, MOD -> typeNamed("string");
-            case BOOLEAN -> typeNamed("boolean");
-            case INTEGER -> numericType(expectedType, "integer");
-            case DECIMAL -> numericType(expectedType, "double");
-            case ITEM -> resolveResourceType(value, expectedType);
-            case TAG -> typeNamed("ingredients");
+            case STRING, MOD -> typeOf(ValueTypes.STRING);
+            case BOOLEAN -> typeOf(ValueTypes.BOOLEAN);
+            case INTEGER -> numericType(expectedType, typeOf(ValueTypes.INTEGER));
+            case DECIMAL -> numericType(expectedType, typeOf(ValueTypes.DOUBLE));
+            case ITEM -> resolveResourceType(value);
+            case TAG -> typeOf(ValueTypes.OBJECT_INGREDIENTS);
         };
+    }
+
+    @Override
+    public ExpressionCompiler.StepKind literalStepKind(ExpressionCompiler.LiteralKind kind,
+                                                        ExpressionCompiler.TypeInfo type) {
+        if (kind == ExpressionCompiler.LiteralKind.ITEM && type.equals(typeOf(ValueTypes.OBJECT_FLUIDSTACK))) {
+            return ExpressionCompiler.StepKind.STATIC_FLUID;
+        }
+        return ExpressionCompiler.Catalog.super.literalStepKind(kind, type);
     }
 
     @Override
@@ -239,7 +251,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .filter(entry -> startsWithIgnoreCase(entry.getKey(), prefix))
                 .filter(entry -> produces(entry.getValue(), expectedType))
                 .sorted(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER))
-                .limit(12)
+                .limit(MAX_COMPLETIONS)
                 .map(entry -> new Completion(entry.getKey() + "(", "global · " + entry.getValue().operatorId(),
                         entry.getValue(), 0))
                 .toList();
@@ -252,7 +264,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .filter(entry -> startsWithIgnoreCase(entry.getKey(), prefix))
                 .filter(entry -> produces(entry.getValue(), expectedType))
                 .sorted(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER))
-                .limit(12)
+                .limit(MAX_COMPLETIONS)
                 .map(entry -> new Completion(insertionPrefix + entry.getKey() + "(", "member · "
                         + entry.getValue().operatorId(), entry.getValue(), 1))
                 .toList();
@@ -284,12 +296,12 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
 
     private List<Completion> modCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
         return matching(modCompletions, prefix,
-                entry -> expectedType == null || produces(typeNamed("string"), expectedType));
+                entry -> expectedType == null || produces(entry.outputType(), expectedType));
     }
 
     private List<Completion> tagCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {
         return matching(tagCompletions, prefix,
-                entry -> expectedType == null || produces(typeNamed("ingredients"), expectedType));
+                entry -> expectedType == null || produces(entry.outputType(), expectedType));
     }
 
     private boolean produces(ExpressionCompiler.FunctionInfo function, ExpressionCompiler.TypeInfo expectedType) {
@@ -297,12 +309,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     }
 
     private boolean producesResource(Completion completion, ExpressionCompiler.TypeInfo expectedType) {
-        if (expectedType == null) {
-            return true;
-        }
-        ExpressionCompiler.TypeInfo actual = completion.detail().equals("fluid") ? typeNamed("fluidstack")
-                : typeNamed("itemstack");
-        return produces(actual, expectedType);
+        return expectedType == null || completion.outputType() != null && produces(completion.outputType(), expectedType);
     }
 
     private boolean produces(ExpressionCompiler.TypeInfo actual, ExpressionCompiler.TypeInfo expectedType) {
@@ -312,10 +319,12 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private List<Completion> buildResourceCompletions() {
         List<Completion> results = new ArrayList<>();
         for (Identifier id : BuiltInRegistries.FLUID.keySet()) {
-            results.add(new Completion("\"$" + id + "\"", "fluid"));
+            results.add(new Completion("\"$" + id + "\"", "fluid", null, 0,
+                    typeOf(ValueTypes.OBJECT_FLUIDSTACK)));
         }
         for (Identifier id : BuiltInRegistries.ITEM.keySet()) {
-            results.add(new Completion("\"$" + id + "\"", "item"));
+            results.add(new Completion("\"$" + id + "\"", "item", null, 0,
+                    typeOf(ValueTypes.OBJECT_ITEMSTACK)));
         }
         return distinctAndSorted(results);
     }
@@ -323,7 +332,8 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
     private List<Completion> buildModCompletions() {
         return ModList.get().getMods().stream()
                 .sorted(Comparator.comparing(mod -> mod.getModId(), String.CASE_INSENSITIVE_ORDER))
-                .map(mod -> new Completion("\"@" + mod.getModId() + "\"", mod.getDisplayName()))
+                .map(mod -> new Completion("\"@" + mod.getModId() + "\"", mod.getDisplayName(), null, 0,
+                        typeOf(ValueTypes.STRING)))
                 .toList();
     }
 
@@ -333,7 +343,8 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
         BuiltInRegistries.FLUID.getTags().forEach(tag -> ids.add(tag.key().location().toString()));
         return ids.stream()
                 .sorted(String.CASE_INSENSITIVE_ORDER)
-                .map(id -> new Completion("\"#" + id + "\"", "item/fluid tag"))
+                .map(id -> new Completion("\"#" + id + "\"", "item/fluid tag", null, 0,
+                        typeOf(ValueTypes.OBJECT_INGREDIENTS)))
                 .toList();
     }
 
@@ -342,7 +353,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .filter(entry -> startsWithIgnoreCase(resourceId(entry.insertion()), prefix)
                         || (entry.insertion().startsWith("\"@") && startsWithIgnoreCase(entry.detail(), prefix)))
                 .filter(allowed)
-                .limit(12)
+                .limit(MAX_COMPLETIONS)
                 .toList();
     }
 
@@ -369,32 +380,24 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 typeOf(operator.getOutputType()), operator.getRequiredInputLength());
     }
 
-    private ExpressionCompiler.TypeInfo resolveResourceType(String value, ExpressionCompiler.TypeInfo expected) {
+    private ExpressionCompiler.TypeInfo resolveResourceType(String value) {
         Identifier id = Identifier.tryParse(value);
         if (id != null && BuiltInRegistries.FLUID.containsKey(id)) {
-            return typeNamed("fluidstack");
+            return typeOf(ValueTypes.OBJECT_FLUIDSTACK);
         }
-        if (expected != null) {
-            String name = expected.displayName().toLowerCase(Locale.ROOT);
-            if (name.equals("fluidstack") || name.equals("itemstack")) {
-                return expected;
-            }
+        if (id != null && BuiltInRegistries.ITEM.containsKey(id)) {
+            return typeOf(ValueTypes.OBJECT_ITEMSTACK);
         }
-        return typeNamed("itemstack");
+        return null;
     }
 
-    private ExpressionCompiler.TypeInfo numericType(ExpressionCompiler.TypeInfo expected, String fallback) {
-        if (expected != null) {
-            String name = expected.displayName().toLowerCase(Locale.ROOT);
-            if (name.equals("integer") || name.equals("long") || name.equals("double")) {
-                return expected;
-            }
+    private ExpressionCompiler.TypeInfo numericType(ExpressionCompiler.TypeInfo expected,
+                                                    ExpressionCompiler.TypeInfo fallback) {
+        if (expected != null && (expected.equals(typeOf(ValueTypes.INTEGER)) || expected.equals(typeOf(ValueTypes.LONG))
+                || expected.equals(typeOf(ValueTypes.DOUBLE)))) {
+            return expected;
         }
-        return typeNamed(fallback);
-    }
-
-    private ExpressionCompiler.TypeInfo typeNamed(String name) {
-        return typesByName.get(name);
+        return fallback;
     }
 
     private ExpressionCompiler.TypeInfo typeOf(IValueType<?> type) {
