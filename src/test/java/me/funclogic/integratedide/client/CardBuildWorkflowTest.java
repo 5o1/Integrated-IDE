@@ -127,6 +127,36 @@ class CardBuildWorkflowTest {
     }
 
     @Test
+    void expandsRepeatedVirtualInputsBecauseOneCardCannotOccupyTwoProgrammerSlots() {
+        String source = "{stack} = \"$minecraft:cobblestone\".withSize(10)\n"
+                + "{alias} = {stack}\n"
+                + "anyEquals({stack}, {alias})";
+        ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(source);
+        assertTrue(compilation.valid(), compilation.message());
+
+        ExpressionCompiler.CardStep root = compilation.steps().getLast();
+        assertEquals(2, root.inputs().size());
+        assertFalse(root.inputs().getFirst().equals(root.inputs().getLast()),
+                "Two simultaneous inputs must be backed by two independently buildable cards.");
+
+        InMemoryLogicProgrammer port = new InMemoryLogicProgrammer(12);
+        CardBuildDriver driver = new CardBuildDriver(port, compilation.steps());
+        driver.start();
+        drain(driver);
+
+        assertTrue(driver.isComplete(), driver.status());
+        assertEquals(compilation.steps().size(), port.confirmedStepIds.size());
+    }
+
+    @Test
+    void rejectsRepeatedExternalCardIdsBeforeTheDriverCanMoveAnyInventoryItem() {
+        ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile("anyEquals({41}, {41})");
+
+        assertFalse(compilation.valid());
+        assertTrue(compilation.message().contains("External Variable Card {41}"), compilation.message());
+    }
+
+    @Test
     void stopsBeforeProducingAPartialPlanWhenThePortRunsOutOfBlankCards() {
         ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(USER_EXPRESSION);
         assertTrue(compilation.valid(), compilation.message());
@@ -171,6 +201,7 @@ class CardBuildWorkflowTest {
         private int remainingBlankCards;
         private int blankCardsConsumed;
         private String activeStepId;
+        private String heldInput;
         private boolean blankPickedUp;
         private boolean outputReady;
 
@@ -196,6 +227,7 @@ class CardBuildWorkflowTest {
         public void select(ExpressionCompiler.CardStep step) {
             activeStepId = step.id();
             selectedInputs.clear();
+            assertEquals(null, heldInput, "A previous input card was not returned to the player inventory.");
             blankPickedUp = false;
             outputReady = false;
         }
@@ -208,13 +240,18 @@ class CardBuildWorkflowTest {
 
         @Override
         public void pickupInput(String stepId) {
+            assertEquals(null, heldInput, "The programmer attempted to pick up two cards at once.");
             assertTrue(cards.containsKey(stepId), "Input card was requested before it was produced: " + stepId);
-            selectedInputs.add(stepId);
+            cards.remove(stepId);
+            heldInput = stepId;
         }
 
         @Override
         public void placeInput(int inputIndex) {
-            assertEquals(inputIndex + 1, selectedInputs.size());
+            assertEquals(inputIndex, selectedInputs.size());
+            assertTrue(heldInput != null, "No input card was held for slot " + inputIndex);
+            selectedInputs.add(heldInput);
+            heldInput = null;
         }
 
         @Override
@@ -260,6 +297,9 @@ class CardBuildWorkflowTest {
         @Override
         public void cleanupInput(int inputIndex) {
             assertTrue(inputIndex < selectedInputs.size());
+            String stepId = selectedInputs.get(inputIndex);
+            assertFalse(cards.containsKey(stepId), "Input card should remain out of inventory until cleanup.");
+            cards.put(stepId, ItemStack.EMPTY);
         }
 
         @Override

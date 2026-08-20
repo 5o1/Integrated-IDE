@@ -115,21 +115,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
 
     @Override
     public ExpressionCompiler.FunctionInfo memberFunction(ExpressionCompiler.TypeInfo receiverType, String name) {
-        IValueType<?> actual = valuesById.get(receiverType.id());
-        if (actual == null) {
-            return null;
-        }
-        Map<String, ExpressionCompiler.FunctionInfo> exact = members.get(receiverType.id());
-        if (exact != null && exact.containsKey(name)) {
-            return exact.get(name);
-        }
-        for (Map.Entry<String, Map<String, ExpressionCompiler.FunctionInfo>> entry : members.entrySet()) {
-            IValueType<?> scope = valuesById.get(entry.getKey());
-            if (scope != null && scope.correspondsTo(actual) && entry.getValue().containsKey(name)) {
-                return entry.getValue().get(name);
-            }
-        }
-        return null;
+        return callableMembers(receiverType).get(name);
     }
 
     @Override
@@ -261,20 +247,7 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
 
     private List<Completion> memberCompletions(ExpressionCompiler.TypeInfo receiver, String prefix, String insertionPrefix,
                                                ExpressionCompiler.TypeInfo expectedType) {
-        Map<String, ExpressionCompiler.FunctionInfo> candidates = new LinkedHashMap<>();
-        Map<String, ExpressionCompiler.FunctionInfo> exact = members.get(receiver.id());
-        if (exact != null) {
-            candidates.putAll(exact);
-        }
-        IValueType<?> actual = valuesById.get(receiver.id());
-        if (actual != null) {
-            for (Map.Entry<String, Map<String, ExpressionCompiler.FunctionInfo>> entry : members.entrySet()) {
-                IValueType<?> scope = valuesById.get(entry.getKey());
-                if (scope != null && actual.correspondsTo(scope)) {
-                    entry.getValue().forEach(candidates::putIfAbsent);
-                }
-            }
-        }
+        Map<String, ExpressionCompiler.FunctionInfo> candidates = callableMembers(receiver);
         return candidates.entrySet().stream()
                 .filter(entry -> startsWithIgnoreCase(entry.getKey(), prefix))
                 .filter(entry -> produces(entry.getValue(), expectedType))
@@ -283,6 +256,26 @@ public final class LogicProgrammerCatalog implements ExpressionCompiler.Catalog 
                 .map(entry -> new Completion(insertionPrefix + entry.getKey() + "(", "member · "
                         + entry.getValue().operatorId(), entry.getValue(), 1))
                 .toList();
+    }
+
+    /** Keeps member compilation and member completion on the same Dynamic type hierarchy rule. */
+    private Map<String, ExpressionCompiler.FunctionInfo> callableMembers(ExpressionCompiler.TypeInfo receiverType) {
+        IValueType<?> actual = valuesById.get(receiverType.id());
+        if (actual == null) {
+            return Map.of();
+        }
+        Map<String, ExpressionCompiler.FunctionInfo> candidates = new LinkedHashMap<>();
+        Map<String, ExpressionCompiler.FunctionInfo> exact = members.get(receiverType.id());
+        if (exact != null) {
+            candidates.putAll(exact);
+        }
+        for (Map.Entry<String, Map<String, ExpressionCompiler.FunctionInfo>> entry : members.entrySet()) {
+            IValueType<?> scope = valuesById.get(entry.getKey());
+            if (scope != null && scope.correspondsTo(actual)) {
+                entry.getValue().forEach(candidates::putIfAbsent);
+            }
+        }
+        return candidates;
     }
 
     private List<Completion> resourceCompletions(String prefix, ExpressionCompiler.TypeInfo expectedType) {

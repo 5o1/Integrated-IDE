@@ -51,7 +51,7 @@ jobs:
           files: build/libs/integratedide-*.jar
           name: Integrated IDE ${{ github.ref_name }}
           version: ${{ github.ref_name }}
-          version-type: ${{ endsWith(github.ref_name, '-alpha') && 'alpha' || endsWith(github.ref_name, '-beta') && 'beta' || 'release' }}
+          version-type: ${{ contains(github.ref_name, '-alpha') && 'alpha' || contains(github.ref_name, '-beta') && 'beta' || 'release' }}
           changelog: Automated release built from Git tag ${{ github.ref_name }}.
           loaders: neoforge
           environment: client
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           release_args=("$GITHUB_REF_NAME" build/libs/integratedide-*.jar --verify-tag --generate-notes)
-          if [[ "$GITHUB_REF_NAME" == *-alpha || "$GITHUB_REF_NAME" == *-beta ]]; then
+          if [[ "$GITHUB_REF_NAME" == *-alpha* || "$GITHUB_REF_NAME" == *-beta* ]]; then
             release_args+=(--prerelease)
           fi
           gh release create "${release_args[@]}"

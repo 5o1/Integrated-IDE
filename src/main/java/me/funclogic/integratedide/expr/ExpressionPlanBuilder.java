@@ -39,9 +39,10 @@ final class ExpressionPlanBuilder {
                             + "} is already defined.");
                 }
                 PlanValue value = lower(assignment.expression(), null);
-                virtualValues.put(assignment.name(), value);
-                virtualTypes.put(assignment.name(), value.type());
-                root = value.id();
+                PlanValue virtualValue = value.withDuplicableDefinition(assignment.expression());
+                virtualValues.put(assignment.name(), virtualValue);
+                virtualTypes.put(assignment.name(), virtualValue.type());
+                root = virtualValue.id();
                 statementRoots.add(new ExpressionCompiler.StatementRoot(assignment.position(), assignment.end(), root));
             } else if (statement instanceof ExpressionSyntax.ExpressionStatement expressionStatement) {
                 root = lower(expressionStatement.expression(), null).id();
@@ -101,7 +102,7 @@ final class ExpressionPlanBuilder {
         }
         ExpressionCompiler.TypeInfo type = expectedType == null ? EXTERNAL_TYPE : expectedType;
         return add(ExpressionCompiler.StepKind.EXTERNAL_REFERENCE, Integer.toString(reference.variableCardId()), List.of(),
-                type, reference.position(), reference.end());
+                type, reference.position(), reference.end(), reference.variableCardId());
     }
 
     private PlanValue lowerGlobalCall(ExpressionSyntax.GlobalCall call) {
@@ -131,31 +132,78 @@ final class ExpressionPlanBuilder {
             throw new ExpressionCompileError(position, function.displayName() + " expects " + function.requiredInputLength()
                     + " to " + function.inputTypes().size() + " argument(s), but received " + supplied + ".");
         }
-        List<String> inputs = new ArrayList<>();
+        List<PlanValue> inputValues = new ArrayList<>();
         int offset = 0;
         if (receiver != null) {
             if (!catalog.isAssignable(receiver.type(), function.inputTypes().getFirst())) {
                 throw new ExpressionCompileError(position, "The receiver is not compatible with "
                         + function.inputTypes().getFirst().displayName() + ".");
             }
-            inputs.add(receiver.id());
+            inputValues.add(receiver);
             offset = 1;
         }
         for (int index = 0; index < arguments.size(); index++) {
-            inputs.add(lower(arguments.get(index), function.inputTypes().get(index + offset)).id());
+            inputValues.add(lower(arguments.get(index), function.inputTypes().get(index + offset)));
         }
+        List<String> inputs = independentInputIds(inputValues, function, position);
         return add(ExpressionCompiler.StepKind.DYNAMIC_OPERATOR, function.operatorId(), inputs, function.outputType(),
                 position, end);
     }
 
-    private PlanValue add(ExpressionCompiler.StepKind kind, String value, List<String> inputs,
-                          ExpressionCompiler.TypeInfo outputType, int sourceStart, int sourceEnd) {
-        String id = "v" + nextId++;
-        steps.add(new ExpressionCompiler.CardStep(id, kind, value, inputs, outputType.id(), sourceStart, sourceEnd));
-        return new PlanValue(id, outputType);
+    /**
+     * The Logic Programmer moves each input card out of the player inventory
+     * before placing it.  A plan may therefore not put one physical card into
+     * two inputs of the same operator.  Virtual values can safely be expanded
+     * here; external IDs cannot because this client has no authority to clone
+     * an existing server-side Variable Card.
+     */
+    private List<String> independentInputIds(List<PlanValue> inputValues, ExpressionCompiler.FunctionInfo function,
+                                             int position) {
+        Map<String, Integer> uses = new LinkedHashMap<>();
+        List<String> inputs = new ArrayList<>();
+        for (PlanValue value : inputValues) {
+            String physicalKey = value.externalCardId() == null ? value.id() : "external:" + value.externalCardId();
+            int use = uses.merge(physicalKey, 1, Integer::sum);
+            if (use == 1) {
+                inputs.add(value.id());
+                continue;
+            }
+            if (value.externalCardId() != null) {
+                throw new ExpressionCompileError(position, "External Variable Card {" + value.externalCardId()
+                        + "} is used more than once by " + function.displayName()
+                        + ". Each Logic Programmer input needs a separate physical card.");
+            }
+            ExpressionSyntax.Expr definition = value.duplicableDefinition();
+            if (definition == null) {
+                throw new ExpressionCompileError(position, "Temporary value " + value.id()
+                        + " cannot be used more than once by " + function.displayName() + ".");
+            }
+            inputs.add(lower(definition, null).id());
+        }
+        return inputs;
     }
 
-    private record PlanValue(String id, ExpressionCompiler.TypeInfo type) {
+    private PlanValue add(ExpressionCompiler.StepKind kind, String value, List<String> inputs,
+                          ExpressionCompiler.TypeInfo outputType, int sourceStart, int sourceEnd) {
+        return add(kind, value, inputs, outputType, sourceStart, sourceEnd, null);
+    }
+
+    private PlanValue add(ExpressionCompiler.StepKind kind, String value, List<String> inputs,
+                          ExpressionCompiler.TypeInfo outputType, int sourceStart, int sourceEnd,
+                          Integer externalCardId) {
+        String id = "v" + nextId++;
+        steps.add(new ExpressionCompiler.CardStep(id, kind, value, inputs, outputType.id(), sourceStart, sourceEnd));
+        return new PlanValue(id, outputType, externalCardId, null);
+    }
+
+    private record PlanValue(String id, ExpressionCompiler.TypeInfo type, Integer externalCardId,
+                             ExpressionSyntax.Expr duplicableDefinition) {
+        /** Preserve the original expression when a temporary is merely an alias of another temporary. */
+        private PlanValue withDuplicableDefinition(ExpressionSyntax.Expr definition) {
+            return duplicableDefinition == null
+                    ? new PlanValue(id, type, externalCardId, definition)
+                    : this;
+        }
     }
 
     private record LoweredProgram(String rootId, List<ExpressionCompiler.StatementRoot> statementRoots) {

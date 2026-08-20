@@ -137,7 +137,7 @@ final class NovelEditorOverlay {
         this.panel.visible = false;
         this.foreground.visible = false;
         this.editor.visible = enabled;
-        this.editor.active = enabled;
+        this.editor.active = enabled && !buildRunning();
         if (enabled) {
             focusEditor();
             sourceChanged();
@@ -169,6 +169,14 @@ final class NovelEditorOverlay {
         if (!novelMode || !editorFocused) {
             return false;
         }
+        if (buildRunning()) {
+            if (IntegratedIdeKeyMappings.matchesCompile(event)) {
+                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff1a" + driver.status());
+            } else if (event.isEscape()) {
+                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u65e0\u6cd5\u5173\u95ed Novel \u6a21\u5f0f\u3002");
+            }
+            return true;
+        }
         if (IntegratedIdeKeyMappings.matchesCompletion(event)) {
             completionExplicitlyRequested = true;
             refreshCompletions();
@@ -191,10 +199,6 @@ final class NovelEditorOverlay {
             return true;
         }
         if (event.isEscape()) {
-            if (driver != null && driver.isRunning()) {
-                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u65e0\u6cd5\u5173\u95ed Novel \u6a21\u5f0f\u3002");
-                return true;
-            }
             setNovelMode(false);
             return true;
         }
@@ -205,6 +209,9 @@ final class NovelEditorOverlay {
     boolean handleCharacterTyped(CharacterEvent event) {
         if (!novelMode || !editorFocused) {
             return false;
+        }
+        if (buildRunning()) {
+            return true;
         }
         editor.charTyped(event);
         return true;
@@ -326,7 +333,7 @@ final class NovelEditorOverlay {
     }
 
     private void sourceChanged() {
-        if (!novelMode || (driver != null && driver.isRunning())) {
+        if (!novelMode || buildRunning()) {
             return;
         }
         completionExplicitlyRequested = false;
@@ -343,11 +350,11 @@ final class NovelEditorOverlay {
 
     private void tick() {
         NovelSessionStore.flushIfDue();
-        if (driver != null && driver.isRunning()) {
+        if (buildRunning()) {
             driver.tick();
             setDiagnostic(driver.isFailed() ? NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status())
                     : NovelDiagnostic.info(driver.status()));
-            if (!driver.isRunning()) {
+            if (!buildRunning()) {
                 editor.active = novelMode;
             }
         }
@@ -359,7 +366,7 @@ final class NovelEditorOverlay {
         // presses the shortcut again. Commit it before recompiling so the
         // second invocation can reuse its Variable Cards.
         finalizeCompletedBuild();
-        if (driver != null && driver.isRunning()) {
+        if (buildRunning()) {
             setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff1a" + driver.status());
             return;
         }
@@ -428,7 +435,7 @@ final class NovelEditorOverlay {
         activeCreatedCards = required;
         buildCommitted = false;
         driver.start();
-        editor.active = !driver.isRunning();
+        editor.active = !buildRunning();
         if (driver.isFailed()) {
             setDiagnostic(NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status()));
         }
@@ -458,6 +465,10 @@ final class NovelEditorOverlay {
     private void setDiagnostic(NovelDiagnostic next) {
         diagnostic = next;
         statusScrollLine = 0;
+    }
+
+    private boolean buildRunning() {
+        return driver != null && driver.isRunning();
     }
 
     private void refreshCompletions() {
@@ -1124,7 +1135,7 @@ final class NovelEditorOverlay {
 
         @Override
         public void onClick(MouseButtonEvent event, boolean doubleClick) {
-            if (driver != null && driver.isRunning()) {
+            if (buildRunning()) {
                 setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u6682\u65f6\u4e0d\u80fd\u5207\u6362\u6a21\u5f0f\u3002");
                 return;
             }
