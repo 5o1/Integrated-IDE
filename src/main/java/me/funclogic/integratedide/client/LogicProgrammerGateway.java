@@ -50,6 +50,10 @@ final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
         return slotItem(slot).isEmpty();
     }
 
+    ItemStack carriedItem() {
+        return menu.getCarried();
+    }
+
     void select(ExpressionCompiler.CardStep step) {
         LogicProgrammerPlanDispatcher.select(step, this);
     }

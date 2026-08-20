@@ -140,6 +140,7 @@ final class NovelEditorOverlay {
             sourceChanged();
         } else {
             yieldEditorFocus();
+            NovelSessionStore.flush();
             this.completions = List.of();
             this.signature = null;
             this.popupMode = NovelCompletionPopup.Mode.NONE;
@@ -345,8 +346,7 @@ final class NovelEditorOverlay {
         refreshCompletions();
     }
 
-    private void tick() {
-        NovelSessionStore.flushIfDue();
+    void tick() {
         if (buildRunning()) {
             driver.tick();
             setDiagnostic(driver.isFailed() ? NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status())
@@ -388,6 +388,7 @@ final class NovelEditorOverlay {
         session.commit(compilation, activeReconciliation, driver.producedCards());
         previewReconciliation = session.reconcile(compilation);
         buildCommitted = true;
+        NovelSessionStore.flush();
         setInfo("\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002");
     }
 
@@ -504,7 +505,6 @@ final class NovelEditorOverlay {
     }
 
     private void renderForeground(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-        tick();
         diagnostics.render(graphics);
         annotations.render(graphics, compilation, previewReconciliation, missingCachedNodes,
                 requiredBlankCards(Minecraft.getInstance().player), mouseX, mouseY);

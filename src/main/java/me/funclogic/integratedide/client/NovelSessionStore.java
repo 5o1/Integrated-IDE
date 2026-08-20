@@ -27,10 +27,8 @@ import org.slf4j.Logger;
 final class NovelSessionStore {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final long FLUSH_DELAY_MILLIS = 750;
     private static FileState fileState;
     private static boolean dirty;
-    private static long dirtySince;
 
     private NovelSessionStore() {
     }
@@ -43,12 +41,6 @@ final class NovelSessionStore {
             return new SavedSession();
         });
         return new Session(saved);
-    }
-
-    static void flushIfDue() {
-        if (dirty && System.currentTimeMillis() - dirtySince >= FLUSH_DELAY_MILLIS) {
-            flush();
-        }
     }
 
     static void flush() {
@@ -68,7 +60,8 @@ final class NovelSessionStore {
             }
             dirty = false;
         } catch (IOException error) {
-            LOGGER.warn("Could not save Integrated IDE Novel session cache; it will retry later.", error);
+            LOGGER.warn("Could not save Integrated IDE Novel session cache; it will retry on the next editor lifecycle action.",
+                    error);
         }
     }
 
@@ -141,7 +134,6 @@ final class NovelSessionStore {
 
     private static void markDirty() {
         dirty = true;
-        dirtySince = System.currentTimeMillis();
     }
 
     static final class Session {

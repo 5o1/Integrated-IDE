@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
 import net.minecraft.client.gui.screens.Screen;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.cyclops.integrateddynamics.client.gui.container.ContainerScreenLogicProgrammerBase;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
@@ -54,6 +55,19 @@ public final class LogicProgrammerScreenHooks {
         NovelEditorOverlay overlay = OVERLAYS.get(event.getScreen());
         if (overlay != null) {
             overlay.renderPost(event.getGuiGraphics(), event.getMouseX(), event.getMouseY(), event.getPartialTick());
+        }
+    }
+
+    /**
+     * Observes synchronized menu state once per client tick. Individual card
+     * build transitions are still driven solely by concrete menu/inventory
+     * predicates, never by the number of elapsed ticks.
+     */
+    public static void tickNovelBuilds(ClientTickEvent.Post event) {
+        synchronized (OVERLAYS) {
+            for (NovelEditorOverlay overlay : OVERLAYS.values()) {
+                overlay.tick();
+            }
         }
     }
 

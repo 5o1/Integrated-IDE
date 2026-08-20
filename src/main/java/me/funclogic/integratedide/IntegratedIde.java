@@ -22,6 +22,7 @@ public final class IntegratedIde {
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::handleKeyPressed);
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::handleCharacterTyped);
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::renderNovelOverlay);
+        NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::tickNovelBuilds);
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::handleMousePressed);
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::handleMouseDragged);
         NeoForge.EVENT_BUS.addListener(LogicProgrammerScreenHooks::handleMouseReleased);

@@ -10,21 +10,19 @@ import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgramm
 import org.slf4j.Logger;
 
 /**
- * Advances one card build at a time. Menu packets and inventory mutation are
- * isolated behind {@link CardBuildPort}, so the production state machine can
- * be exercised through a complete, controlled workflow test.
+ * Drives one Variable Card plan through the normal Logic Programmer menu.
+ * Commands are never separated by guessed tick delays: every menu mutation
+ * that requires a server response waits for its corresponding synchronized
+ * container or inventory state before the next command is sent.
  */
 public final class CardBuildDriver {
-    private static final int TICKS_BETWEEN_ACTIONS = 3;
-    private static final int MAX_OUTPUT_WAIT_TICKS = 200;
+    private static final int MAX_IMMEDIATE_TRANSITIONS = 64;
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final CardBuildPort port;
     private final List<ExpressionCompiler.CardStep> steps;
     private int stepIndex;
     private int inputIndex;
-    private int cooldown;
-    private int outputWaitTicks;
     private Phase phase = Phase.IDLE;
     private String status = "\u7b49\u5f85\u5f00\u59cb";
 
@@ -71,6 +69,12 @@ public final class CardBuildDriver {
         return status;
     }
 
+    /**
+     * Called from the client tick event. It dispatches consecutive local
+     * commands immediately, then stops only at a concrete synchronization
+     * condition. The transition cap prevents a malformed port from starving
+     * the client tick; it is not a time-based wait.
+     */
     public void tick() {
         if (!isRunning()) {
             return;
@@ -79,134 +83,205 @@ public final class CardBuildDriver {
             fail("\u903b\u8f91\u7f16\u7a0b\u5668\u5df2\u5173\u95ed\u6216\u5207\u6362\uff0c\u5df2\u505c\u6b62\u4ee5\u907f\u514d\u79fb\u52a8\u9519\u8bef\u7269\u54c1");
             return;
         }
-        if (cooldown > 0) {
-            cooldown--;
-            return;
-        }
         try {
-            advance();
+            for (int transition = 0; transition < MAX_IMMEDIATE_TRANSITIONS && isRunning(); transition++) {
+                if (!advance()) {
+                    return;
+                }
+            }
+            if (isRunning()) {
+                fail("\u53d8\u91cf\u5361\u6784\u5efa\u72b6\u6001\u673a\u5728\u4e00\u4e2a\u5ba2\u6237\u7aef tick \u5185\u8d85\u8fc7\u4e86\u5b89\u5168\u8f6c\u79fb\u9650\u5236");
+            }
         } catch (RuntimeException error) {
             fail(error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
         }
     }
 
-    private void advance() {
+    /** @return whether another command can be dispatched in the same client tick. */
+    private boolean advance() {
         if (stepIndex >= steps.size()) {
             phase = Phase.COMPLETE;
             status = "\u5b8c\u6210\uff1a\u5df2\u751f\u6210 " + steps.size()
                     + " \u5f20\u666e\u901a\u53d8\u91cf\u5361\u3002\u8bf7\u5c06\u4f9d\u8d56\u5361\u548c\u6700\u7ec8\u5361\u653e\u5165\u540c\u4e00 Variable Store\u3002";
-            return;
+            return false;
         }
         ExpressionCompiler.CardStep step = steps.get(stepIndex);
-        switch (phase) {
+        return switch (phase) {
             case SELECT -> select(step);
             case CONFIGURE -> configure(step);
-            case INSERT_INPUT -> insertInput(step);
+            case WAIT_INPUT_SLOT -> waitForInputSlot(step);
+            case PICK_INPUT -> pickupInput(step);
+            case WAIT_INPUT_HELD -> waitForInputHeld(step);
             case PLACE_INPUT -> placeInput();
-            case PICK_BLANK -> pickBlank();
+            case WAIT_INPUT_PLACED -> waitForInputPlaced(step);
+            case PICK_BLANK -> pickupBlank();
+            case WAIT_BLANK_HELD -> waitForBlankHeld();
             case PLACE_BLANK -> placeBlank();
+            case WAIT_OUTPUT_READY -> waitForOutputReady();
             case RETURN_REMAINDER -> returnRemainder();
-            case WAIT_FOR_OUTPUT -> waitForOutput();
+            case WAIT_REMAINDER_RETURNED -> waitForRemainderReturned();
             case STORE_OUTPUT -> storeOutput();
+            case WAIT_OUTPUT_STORED -> waitForOutputStored();
             case CONFIRM_OUTPUT -> confirmOutput(step);
             case CLEANUP_INPUT -> cleanupInput(step);
+            case WAIT_INPUT_RETURNED -> waitForInputReturned(step);
             default -> throw new IllegalStateException("Unknown card-build phase: " + phase);
-        }
+        };
     }
 
-    private void select(ExpressionCompiler.CardStep step) {
+    private boolean select(ExpressionCompiler.CardStep step) {
         port.select(step);
         inputIndex = 0;
-        phase = step.kind() == ExpressionCompiler.StepKind.DYNAMIC_OPERATOR ? Phase.INSERT_INPUT : Phase.CONFIGURE;
-        delay();
-    }
-
-    private void configure(ExpressionCompiler.CardStep step) {
-        port.configure(step);
-        phase = Phase.INSERT_INPUT;
-        delay();
-    }
-
-    private void insertInput(ExpressionCompiler.CardStep step) {
-        if (inputIndex >= step.inputs().size()) {
+        if (step.kind() != ExpressionCompiler.StepKind.DYNAMIC_OPERATOR) {
+            phase = Phase.CONFIGURE;
+        } else if (step.inputs().isEmpty()) {
             phase = Phase.PICK_BLANK;
-            return;
+        } else {
+            phase = Phase.WAIT_INPUT_SLOT;
         }
+        return true;
+    }
+
+    private boolean configure(ExpressionCompiler.CardStep step) {
+        port.configure(step);
+        phase = Phase.PICK_BLANK;
+        return true;
+    }
+
+    private boolean waitForInputSlot(ExpressionCompiler.CardStep step) {
+        if (!port.inputSlotReady(inputIndex)) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u521b\u5efa\u7b2c " + (inputIndex + 1)
+                    + " \u4e2a\u8f93\u5165\u69fd\u2026");
+        }
+        phase = Phase.PICK_INPUT;
+        return true;
+    }
+
+    private boolean pickupInput(ExpressionCompiler.CardStep step) {
         port.pickupInput(step.inputs().get(inputIndex));
-        phase = Phase.PLACE_INPUT;
-        delay();
+        phase = Phase.WAIT_INPUT_HELD;
+        return false;
     }
 
-    private void placeInput() {
-        port.placeInput(inputIndex);
-        inputIndex++;
-        phase = Phase.INSERT_INPUT;
-        delay();
-    }
-
-    private void pickBlank() {
-        port.pickupBlank();
-        phase = Phase.PLACE_BLANK;
-        delay();
-    }
-
-    private void placeBlank() {
-        port.placeBlank();
-        phase = Phase.RETURN_REMAINDER;
-        delay();
-    }
-
-    private void returnRemainder() {
-        port.returnBlankRemainder();
-        phase = Phase.WAIT_FOR_OUTPUT;
-        outputWaitTicks = 0;
-        cooldown = 8;
-    }
-
-    private void waitForOutput() {
-        if (!port.outputReady()) {
-            outputWaitTicks += TICKS_BETWEEN_ACTIONS;
-            if (outputWaitTicks > MAX_OUTPUT_WAIT_TICKS) {
-                throw new IllegalStateException("等待第 " + (stepIndex + 1) + "/" + steps.size()
-                        + " 张变量卡的输出超时；请检查逻辑编程器中的输入卡类型和背包空间");
-            }
-            status = "正在等待第 " + (stepIndex + 1) + "/" + steps.size() + " 张变量卡的输出…";
-            cooldown = 2;
-            return;
+    private boolean waitForInputHeld(ExpressionCompiler.CardStep step) {
+        String input = step.inputs().get(inputIndex);
+        if (!port.inputHeld(input)) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u7b2c " + (inputIndex + 1)
+                    + " \u5f20\u8f93\u5165\u53d8\u91cf\u5361\u2026");
         }
-        outputWaitTicks = 0;
+        phase = Phase.PLACE_INPUT;
+        return true;
+    }
+
+    private boolean placeInput() {
+        port.placeInput(inputIndex);
+        phase = Phase.WAIT_INPUT_PLACED;
+        return false;
+    }
+
+    private boolean waitForInputPlaced(ExpressionCompiler.CardStep step) {
+        String input = step.inputs().get(inputIndex);
+        if (!port.inputPlaced(inputIndex, input)) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u786e\u8ba4\u7b2c " + (inputIndex + 1)
+                    + " \u5f20\u8f93\u5165\u53d8\u91cf\u5361\u2026");
+        }
+        inputIndex++;
+        phase = inputIndex < step.inputs().size() ? Phase.WAIT_INPUT_SLOT : Phase.PICK_BLANK;
+        return true;
+    }
+
+    private boolean pickupBlank() {
+        port.pickupBlank();
+        phase = Phase.WAIT_BLANK_HELD;
+        return false;
+    }
+
+    private boolean waitForBlankHeld() {
+        if (!port.blankHeld()) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u7a7a\u767d Variable Card\u2026");
+        }
+        phase = Phase.PLACE_BLANK;
+        return true;
+    }
+
+    private boolean placeBlank() {
+        port.placeBlank();
+        phase = Phase.WAIT_OUTPUT_READY;
+        return false;
+    }
+
+    private boolean waitForOutputReady() {
+        if (!port.outputReady()) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u5199\u5165\u53d8\u91cf\u5361\u8f93\u51fa\u2026");
+        }
+        phase = Phase.RETURN_REMAINDER;
+        return true;
+    }
+
+    private boolean returnRemainder() {
+        port.returnBlankRemainder();
+        phase = Phase.WAIT_REMAINDER_RETURNED;
+        return false;
+    }
+
+    private boolean waitForRemainderReturned() {
+        if (!port.blankRemainderReturned()) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u8fd4\u56de\u7a7a\u767d Variable Card \u4f59\u91cf\u2026");
+        }
         phase = Phase.STORE_OUTPUT;
+        return true;
     }
 
-    private void storeOutput() {
+    private boolean storeOutput() {
         port.storeOutput();
+        phase = Phase.WAIT_OUTPUT_STORED;
+        return false;
+    }
+
+    private boolean waitForOutputStored() {
+        if (!port.outputStored()) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u540c\u6b65\u65b0\u53d8\u91cf\u5361\u5230\u80cc\u5305\u2026");
+        }
         phase = Phase.CONFIRM_OUTPUT;
-        delay();
+        return true;
     }
 
-    private void confirmOutput(ExpressionCompiler.CardStep step) {
+    private boolean confirmOutput(ExpressionCompiler.CardStep step) {
         port.confirmOutput(step.id());
-        phase = Phase.CLEANUP_INPUT;
         inputIndex = 0;
+        phase = Phase.CLEANUP_INPUT;
+        return true;
     }
 
-    private void cleanupInput(ExpressionCompiler.CardStep step) {
+    private boolean cleanupInput(ExpressionCompiler.CardStep step) {
         if (inputIndex >= step.inputs().size()) {
             stepIndex++;
             phase = Phase.SELECT;
             status = "\u5df2\u751f\u6210 " + stepIndex + "/" + steps.size() + " \u5f20\u53d8\u91cf\u5361\u2026";
-            return;
+            return true;
         }
-        port.cleanupInput(inputIndex++);
-        delay();
+        port.cleanupInput(inputIndex);
+        phase = Phase.WAIT_INPUT_RETURNED;
+        return false;
+    }
+
+    private boolean waitForInputReturned(ExpressionCompiler.CardStep step) {
+        String input = step.inputs().get(inputIndex);
+        if (!port.inputReturned(inputIndex, input)) {
+            return waiting("\u6b63\u5728\u7b49\u5f85\u670d\u52a1\u5668\u5f52\u8fd8\u8f93\u5165\u53d8\u91cf\u5361\u2026");
+        }
+        inputIndex++;
+        phase = Phase.CLEANUP_INPUT;
+        return true;
+    }
+
+    private boolean waiting(String message) {
+        status = message;
+        return false;
     }
 
     public static int countBlankVariableCards(Player player) {
         return CardInventory.countBlankVariableCards(player);
-    }
-
-    private void delay() {
-        cooldown = TICKS_BETWEEN_ACTIONS;
     }
 
     private void fail(String message) {
@@ -217,7 +292,9 @@ public final class CardBuildDriver {
     }
 
     private enum Phase {
-        IDLE, SELECT, CONFIGURE, INSERT_INPUT, PLACE_INPUT, PICK_BLANK, PLACE_BLANK, RETURN_REMAINDER,
-        WAIT_FOR_OUTPUT, STORE_OUTPUT, CONFIRM_OUTPUT, CLEANUP_INPUT, COMPLETE, FAILED
+        IDLE, SELECT, CONFIGURE, WAIT_INPUT_SLOT, PICK_INPUT, WAIT_INPUT_HELD, PLACE_INPUT,
+        WAIT_INPUT_PLACED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
+        RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, STORE_OUTPUT, WAIT_OUTPUT_STORED, CONFIRM_OUTPUT,
+        CLEANUP_INPUT, WAIT_INPUT_RETURNED, COMPLETE, FAILED
     }
 }

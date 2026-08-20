@@ -17,21 +17,35 @@ interface CardBuildPort {
 
     void pickupInput(String stepId);
 
+    boolean inputHeld(String stepId);
+
+    boolean inputSlotReady(int inputIndex);
+
     void placeInput(int inputIndex);
 
+    boolean inputPlaced(int inputIndex, String stepId);
+
     void pickupBlank();
+
+    boolean blankHeld();
 
     void placeBlank();
 
     void returnBlankRemainder();
 
+    boolean blankRemainderReturned();
+
     boolean outputReady();
 
     void storeOutput();
 
+    boolean outputStored();
+
     void confirmOutput(String stepId);
 
     void cleanupInput(int inputIndex);
+
+    boolean inputReturned(int inputIndex, String stepId);
 
     Map<String, ItemStack> producedCards();
 }
