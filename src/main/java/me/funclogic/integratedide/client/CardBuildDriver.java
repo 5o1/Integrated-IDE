@@ -16,7 +16,6 @@ import org.slf4j.Logger;
  * container or inventory state before the next command is sent.
  */
 public final class CardBuildDriver {
-    private static final int MAX_IMMEDIATE_TRANSITIONS = 64;
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final CardBuildPort port;
@@ -72,8 +71,8 @@ public final class CardBuildDriver {
     /**
      * Called from the client tick event. It dispatches consecutive local
      * commands immediately, then stops only at a concrete synchronization
-     * condition. The transition cap prevents a malformed port from starving
-     * the client tick; it is not a time-based wait.
+     * condition. Every mutating command forms a state barrier, so a valid
+     * plan cannot spin through unbounded transitions in one client tick.
      */
     public void tick() {
         if (!isRunning()) {
@@ -84,13 +83,9 @@ public final class CardBuildDriver {
             return;
         }
         try {
-            for (int transition = 0; transition < MAX_IMMEDIATE_TRANSITIONS && isRunning(); transition++) {
-                if (!advance()) {
-                    return;
-                }
-            }
-            if (isRunning()) {
-                fail("\u53d8\u91cf\u5361\u6784\u5efa\u72b6\u6001\u673a\u5728\u4e00\u4e2a\u5ba2\u6237\u7aef tick \u5185\u8d85\u8fc7\u4e86\u5b89\u5168\u8f6c\u79fb\u9650\u5236");
+            while (isRunning() && advance()) {
+                // Continue only through local state transitions. Each menu
+                // mutation returns false and waits for a synchronized result.
             }
         } catch (RuntimeException error) {
             fail(error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
