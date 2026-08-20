@@ -12,9 +12,10 @@ import org.slf4j.Logger;
 
 /**
  * Drives one Variable Card plan through the normal Logic Programmer menu.
- * Commands are never separated by guessed tick delays: every menu mutation
- * that requires a server response waits for its corresponding synchronized
- * container or inventory state before the next command is sent.
+ * Commands are never separated by guessed tick delays. Ordinary container
+ * clicks use Minecraft's local prediction and are sent in order; only a
+ * Variable Card that Dynamic creates or returns on the server is an
+ * authoritative synchronization barrier.
  */
 public final class CardBuildDriver {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -92,8 +93,9 @@ public final class CardBuildDriver {
     /**
      * Called from the client tick event. It dispatches consecutive local
      * commands immediately, then stops only at a concrete synchronization
-     * condition. Every mutating command forms a state barrier, so a valid
-     * plan cannot spin through unbounded transitions in one client tick.
+     * condition. Predicted clicks can safely be queued in one tick because
+     * Minecraft preserves packet order; server-created cards form the
+     * concrete barriers that end the dispatch sequence.
      */
     public void tick() {
         if (!isRunning()) {
@@ -186,7 +188,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputHeld(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!synchronizedAfterCommand() || !port.inputHeld(input)) {
+        if (!port.inputHeld(input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_held", inputIndex + 1));
         }
         phase = Phase.PLACE_INPUT;
@@ -201,7 +203,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputPlaced(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!synchronizedAfterCommand() || !port.inputPlaced(inputIndex, input)) {
+        if (!port.inputPlaced(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_placed", inputIndex + 1));
         }
         phase = Phase.RETURN_INPUT_CURSOR;
@@ -219,7 +221,7 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForInputCursorReturned(ExpressionCompiler.CardStep step) {
-        if (!synchronizedAfterCommand() || !port.inputCursorReturned()) {
+        if (!port.inputCursorReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.input_cursor", inputIndex + 1));
         }
         advanceInput(step);
@@ -238,7 +240,7 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForBlankHeld() {
-        if (!synchronizedAfterCommand() || !port.blankHeld()) {
+        if (!port.blankHeld()) {
             return waiting(Component.translatable("integratedide.build.wait.blank_held"));
         }
         phase = Phase.PLACE_BLANK;
@@ -271,7 +273,7 @@ public final class CardBuildDriver {
     }
 
     private boolean waitForRemainderReturned() {
-        if (!synchronizedAfterCommand() || !port.blankRemainderReturned()) {
+        if (!port.blankRemainderReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.remainder"));
         }
         // The dedicated reset packet clears the active element, so all
@@ -315,7 +317,7 @@ public final class CardBuildDriver {
 
     private boolean waitForInputReturned(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!synchronizedAfterCommand() || !port.inputReturned(inputIndex, input)) {
+        if (!port.inputReturned(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_returned"));
         }
         inputIndex++;
@@ -329,8 +331,9 @@ public final class CardBuildDriver {
     }
 
     /**
-     * Dispatch a container mutation and establish the exact client snapshot
-     * that must be superseded before its postcondition may be observed.
+     * Dispatch a mutation and retain the last authoritative revision for the
+     * server-created-card phases. Normal container clicks instead use their
+     * already-applied local prediction as their immediate postcondition.
      */
     private void issue(Runnable command) {
         commandRevision = port.synchronizationRevision();

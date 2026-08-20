@@ -131,15 +131,21 @@ class CardBuildWorkflowTest {
         assertTrue(run.port.clientCursorStillContainsPendingReference(),
                 "A reference input must leave the source Variable Card on the client cursor.");
 
+        long revisionBeforePlacementFlush = run.port.synchronizationRevision();
         run.port.flushServerChanges();
+        assertEquals(revisionBeforePlacementFlush, run.port.synchronizationRevision(),
+                "A correctly predicted reference-input click must not require a redundant server slot delta.");
         run.driver.tick();
         assertTrue(run.port.hasSentInputCursorReturn(),
                 "The driver must return the predicted cursor card through a separate container click.");
+        long revisionBeforeReturnFlush = run.port.synchronizationRevision();
         run.port.flushServerChanges();
+        assertEquals(revisionBeforeReturnFlush, run.port.synchronizationRevision(),
+                "Returning a correctly predicted cursor card must also progress without a redundant server delta.");
         run.driver.tick();
 
         assertTrue(run.port.clientCursorIsEmpty(),
-                "The input-card return must be confirmed by a newer server snapshot.");
+                "The second client prediction must return the input card to its inventory slot.");
         drainAfterEveryServerSnapshot(run);
         assertTrue(run.driver.isComplete(), run.driver.status());
     }
@@ -243,10 +249,11 @@ class CardBuildWorkflowTest {
                 break;
             }
             run.port.flushServerChanges();
-            if (run.port.synchronizationRevision() == revisionBeforeTick) {
-                throw new AssertionError("The server emitted no container synchronization after "
-                        + (run.port.commandCount() == commandsBeforeTick ? "the pending transition" : "command")
-                        + "; driver=" + run.driver.status() + ". " + run.port.describeState());
+            if (run.port.synchronizationRevision() == revisionBeforeTick
+                    && run.port.commandCount() == commandsBeforeTick) {
+                throw new AssertionError("The driver is waiting for an authoritative server result, but Dynamic "
+                        + "emitted no container synchronization; driver=" + run.driver.status() + ". "
+                        + run.port.describeState());
             }
         }
     }
@@ -254,10 +261,12 @@ class CardBuildWorkflowTest {
     private static void advanceUntilFirstOutputReturnIsSent(BuildRun run) {
         while (run.port.returnOutputRequests == 0) {
             long revisionBeforeTick = run.port.synchronizationRevision();
+            int commandsBeforeTick = run.port.commandCount();
             run.driver.tick();
             if (run.port.returnOutputRequests == 0) {
                 run.port.flushServerChanges();
-                if (run.port.synchronizationRevision() == revisionBeforeTick) {
+                if (run.port.synchronizationRevision() == revisionBeforeTick
+                        && run.port.commandCount() == commandsBeforeTick) {
                     throw new AssertionError("The server emitted no container synchronization before the first "
                             + "output return. " + run.port.describeState());
                 }
@@ -270,10 +279,12 @@ class CardBuildWorkflowTest {
     private static void advanceUntilFirstInputPlacementIsSent(BuildRun run) {
         while (!run.port.hasSentFirstInputPlacement()) {
             long revisionBeforeTick = run.port.synchronizationRevision();
+            int commandsBeforeTick = run.port.commandCount();
             run.driver.tick();
             if (!run.port.hasSentFirstInputPlacement()) {
                 run.port.flushServerChanges();
-                if (run.port.synchronizationRevision() == revisionBeforeTick) {
+                if (run.port.synchronizationRevision() == revisionBeforeTick
+                        && run.port.commandCount() == commandsBeforeTick) {
                     throw new AssertionError("The server emitted no container synchronization before the first "
                             + "reference-input placement. " + run.port.describeState());
                 }

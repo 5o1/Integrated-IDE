@@ -15,8 +15,9 @@ public interface CardBuildPort {
      * Monotonically increases only when the client observes a newer
      * authoritative container or player-inventory synchronization state.
      *
-     * <p>The driver records this value before every inventory mutation and
-     * never treats local click prediction as an acknowledgement.</p>
+     * <p>The driver records this value before mutations whose result is
+     * created on the server. Ordinary container clicks use the client's
+     * deterministic prediction and do not necessarily produce a reply.</p>
      */
     long synchronizationRevision();
 
