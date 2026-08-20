@@ -14,6 +14,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.ContainerSynchronizer;
+import net.minecraft.world.inventory.RemoteSlot;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.common.util.FakePlayerFactory;
@@ -111,7 +113,7 @@ class CardBuildWorkflowTest {
         assertTrue(run.port.serverHasReturnedCurrentOutput(),
                 "The real Dynamic reset packet must have emptied the server write slot first.");
 
-        run.port.synchronizeFromServer();
+        run.port.flushServerChanges();
         drainAfterEveryServerSnapshot(run);
 
         assertTrue(run.driver.isComplete(), run.driver.status());
@@ -153,7 +155,7 @@ class CardBuildWorkflowTest {
     private static void drainAfterEveryServerSnapshot(BuildRun run) {
         for (int exchanges = 0; exchanges < 256 && run.driver.isRunning(); exchanges++) {
             run.driver.tick();
-            run.port.synchronizeFromServer();
+            run.port.flushServerChanges();
         }
         assertFalse(run.driver.isRunning(), "The real Logic Programmer workflow did not reach a terminal state.");
     }
@@ -162,7 +164,7 @@ class CardBuildWorkflowTest {
         for (int exchanges = 0; exchanges < 128 && run.port.returnOutputRequests == 0; exchanges++) {
             run.driver.tick();
             if (run.port.returnOutputRequests == 0) {
-                run.port.synchronizeFromServer();
+                run.port.flushServerChanges();
             }
         }
         assertEquals(1, run.port.returnOutputRequests,
@@ -194,6 +196,7 @@ class CardBuildWorkflowTest {
         private final Map<String, ItemStack> produced = new LinkedHashMap<>();
         private final Map<Integer, ItemStack> placedInputs = new LinkedHashMap<>();
         private final List<String> confirmedStepIds = new ArrayList<>();
+        private final List<Integer> playerInventorySlots;
         private ObservedMenuState snapshot;
         private long synchronizationRevision;
         private ItemStack pendingInput = ItemStack.EMPTY;
@@ -206,7 +209,13 @@ class CardBuildWorkflowTest {
             this.level = level;
             this.player = player;
             this.menu = menu;
-            this.snapshot = ObservedMenuState.capture(menu, player);
+            this.playerInventorySlots = playerInventorySlots(menu, player);
+            this.snapshot = ObservedMenuState.empty(menu.slots.size());
+            // This is the server's actual container-delta boundary. The test
+            // driver can see a slot only after AbstractContainerMenu has
+            // emitted it through this synchronizer, never by inspecting the
+            // mutable server menu directly.
+            this.menu.setSynchronizer(new LoopbackMenuSynchronizer(this));
         }
 
         static ServerDrivenProgrammer open(MinecraftServer server, int blankCards, boolean separateStacks) {
@@ -226,22 +235,34 @@ class CardBuildWorkflowTest {
             return new ServerDrivenProgrammer(level, player, menu);
         }
 
-        void synchronizeFromServer() {
-            ObservedMenuState next = ObservedMenuState.capture(menu, player);
-            if (!next.sameAs(snapshot)) {
-                snapshot = next;
-                synchronizationRevision++;
-            }
+        void flushServerChanges() {
+            menu.broadcastChanges();
+        }
+
+        private void receiveInitialState(List<ItemStack> slots, ItemStack carried) {
+            snapshot = ObservedMenuState.initial(slots, carried);
+            synchronizationRevision++;
+        }
+
+        private void receiveSlot(int slot, ItemStack stack) {
+            snapshot = snapshot.withSlot(slot, stack);
+            synchronizationRevision++;
+        }
+
+        private void receiveCarried(ItemStack carried) {
+            snapshot = snapshot.withCarried(carried);
+            synchronizationRevision++;
         }
 
         boolean serverHasReturnedCurrentOutput() {
             return menu.slots.get(LogicProgrammerMenuLayout.writeSlot(menu)).getItem().isEmpty()
-                    && findPlayerStack(pendingOutput, player.getInventory().getNonEquipmentItems()) != null;
+                    && findServerPlayerStack(pendingOutput) != null;
         }
 
         int validCardsInPlayerInventory() {
             int cards = 0;
-            for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            for (int slot : playerInventorySlots) {
+                ItemStack stack = snapshot.slot(slot);
                 if (isValidVariable(stack)) {
                     cards += stack.getCount();
                 }
@@ -261,10 +282,11 @@ class CardBuildWorkflowTest {
 
         @Override
         public String serverFailure() {
-            if (errorBeforeAction == null || snapshot.lastError.isBlank() || snapshot.lastError.equals(errorBeforeAction)) {
+            String currentError = errorText();
+            if (errorBeforeAction == null || currentError.isBlank() || currentError.equals(errorBeforeAction)) {
                 return null;
             }
-            return snapshot.lastError;
+            return currentError;
         }
 
         @Override
@@ -415,12 +437,12 @@ class CardBuildWorkflowTest {
         public boolean outputReturned() {
             return pendingOutput != null && !pendingOutput.isEmpty()
                     && snapshot.slot(LogicProgrammerMenuLayout.writeSlot(menu)).isEmpty()
-                    && findPlayerStack(pendingOutput, snapshot.playerInventory) != null;
+                    && findReceivedPlayerStack(pendingOutput) != null;
         }
 
         @Override
         public void confirmOutput(String stepId) {
-            ItemStack stored = findPlayerStack(pendingOutput, snapshot.playerInventory);
+            ItemStack stored = findReceivedPlayerStack(pendingOutput);
             if (stored == null) {
                 throw new IllegalStateException("The returned output was absent from the synchronized inventory.");
             }
@@ -435,7 +457,7 @@ class CardBuildWorkflowTest {
                 throw new IllegalStateException("The active element no longer exposes input " + inputIndex + '.');
             }
             int slot = LogicProgrammerMenuLayout.inputSlot(menu, inputIndex);
-            if (!menu.slots.get(slot).getItem().isEmpty()) {
+            if (!snapshot.slot(slot).isEmpty()) {
                 beforeServerAction();
                 menu.clicked(slot, 0, ContainerInput.QUICK_MOVE, player);
             }
@@ -448,7 +470,7 @@ class CardBuildWorkflowTest {
                 return false;
             }
             int inputSlot = LogicProgrammerMenuLayout.inputSlot(menu, inputIndex);
-            return snapshot.slot(inputSlot).isEmpty() && findPlayerStack(expected, snapshot.playerInventory) != null;
+            return snapshot.slot(inputSlot).isEmpty() && findReceivedPlayerStack(expected) != null;
         }
 
         @Override
@@ -457,13 +479,13 @@ class CardBuildWorkflowTest {
         }
 
         private void beforeServerAction() {
-            errorBeforeAction = snapshot.lastError;
+            errorBeforeAction = errorText();
         }
 
         private int findBlankSlot() {
             for (int index = 0; index < menu.slots.size(); index++) {
                 Slot slot = menu.slots.get(index);
-                if (slot.container == player.getInventory() && isBlankVariable(slot.getItem())) {
+                if (slot.container == player.getInventory() && isBlankVariable(snapshot.slot(index))) {
                     return index;
                 }
             }
@@ -473,20 +495,44 @@ class CardBuildWorkflowTest {
         private int findPlayerSlot(ItemStack expected) {
             for (int index = 0; index < menu.slots.size(); index++) {
                 Slot slot = menu.slots.get(index);
-                if (slot.container == player.getInventory() && sameStack(slot.getItem(), expected)) {
+                if (slot.container == player.getInventory() && sameStack(snapshot.slot(index), expected)) {
                     return index;
                 }
             }
             return -1;
         }
 
-        private ItemStack findPlayerStack(ItemStack expected, List<ItemStack> inventory) {
-            for (ItemStack stack : inventory) {
+        private ItemStack findReceivedPlayerStack(ItemStack expected) {
+            for (int slot : playerInventorySlots) {
+                ItemStack stack = snapshot.slot(slot);
                 if (sameStack(stack, expected)) {
                     return stack;
                 }
             }
             return null;
+        }
+
+        private ItemStack findServerPlayerStack(ItemStack expected) {
+            for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+                if (sameStack(stack, expected)) {
+                    return stack;
+                }
+            }
+            return null;
+        }
+
+        private String errorText() {
+            return menu.getLastError() == null ? "" : menu.getLastError().getString();
+        }
+
+        private static List<Integer> playerInventorySlots(ContainerLogicProgrammerBase menu, ServerPlayer player) {
+            List<Integer> slots = new ArrayList<>();
+            for (int index = 0; index < menu.slots.size(); index++) {
+                if (menu.slots.get(index).container == player.getInventory()) {
+                    slots.add(index);
+                }
+            }
+            return List.copyOf(slots);
         }
 
         private boolean isBlankVariable(ItemStack stack) {
@@ -507,44 +553,100 @@ class CardBuildWorkflowTest {
     private static final class ObservedMenuState {
         private final List<ItemStack> slots;
         private final ItemStack carried;
-        private final List<ItemStack> playerInventory;
-        private final String lastError;
 
-        private ObservedMenuState(List<ItemStack> slots, ItemStack carried, List<ItemStack> playerInventory,
-                                  String lastError) {
-            this.slots = slots;
-            this.carried = carried;
-            this.playerInventory = playerInventory;
-            this.lastError = lastError;
+        private ObservedMenuState(List<ItemStack> slots, ItemStack carried) {
+            this.slots = slots.stream().map(ItemStack::copy).toList();
+            this.carried = carried.copy();
         }
 
-        static ObservedMenuState capture(ContainerLogicProgrammerBase menu, ServerPlayer player) {
-            List<ItemStack> slots = menu.slots.stream().map(slot -> slot.getItem().copy()).toList();
-            List<ItemStack> inventory = player.getInventory().getNonEquipmentItems().stream().map(ItemStack::copy).toList();
-            String error = menu.getLastError() == null ? "" : menu.getLastError().getString();
-            return new ObservedMenuState(slots, menu.getCarried().copy(), inventory, error);
+        static ObservedMenuState empty(int slotCount) {
+            List<ItemStack> emptySlots = new ArrayList<>(slotCount);
+            for (int index = 0; index < slotCount; index++) {
+                emptySlots.add(ItemStack.EMPTY);
+            }
+            return new ObservedMenuState(emptySlots, ItemStack.EMPTY);
+        }
+
+        static ObservedMenuState initial(List<ItemStack> slots, ItemStack carried) {
+            return new ObservedMenuState(slots, carried);
         }
 
         ItemStack slot(int index) {
             return index >= 0 && index < slots.size() ? slots.get(index) : ItemStack.EMPTY;
         }
 
-        boolean sameAs(ObservedMenuState other) {
-            return other != null && sameStackLists(slots, other.slots) && sameStack(carried, other.carried)
-                    && sameStackLists(playerInventory, other.playerInventory) && lastError.equals(other.lastError);
+        ObservedMenuState withSlot(int index, ItemStack stack) {
+            if (index < 0 || index >= slots.size()) {
+                throw new IllegalArgumentException("Server synchronized an invalid slot " + index + '.');
+            }
+            List<ItemStack> updated = new ArrayList<>(slots);
+            updated.set(index, stack.copy());
+            return new ObservedMenuState(updated, carried);
+        }
+
+        ObservedMenuState withCarried(ItemStack updatedCarried) {
+            return new ObservedMenuState(slots, updatedCarried);
         }
     }
 
-    private static boolean sameStackLists(List<ItemStack> left, List<ItemStack> right) {
-        if (left.size() != right.size()) {
-            return false;
+    /**
+     * Mirrors exactly the container messages a connected player receives.
+     * It deliberately exposes no path that reads a slot from the server menu.
+     */
+    private static final class LoopbackMenuSynchronizer implements ContainerSynchronizer {
+        private final ServerDrivenProgrammer client;
+
+        private LoopbackMenuSynchronizer(ServerDrivenProgrammer client) {
+            this.client = client;
         }
-        for (int index = 0; index < left.size(); index++) {
-            if (!sameStack(left.get(index), right.get(index))) {
-                return false;
-            }
+
+        @Override
+        public void sendInitialData(net.minecraft.world.inventory.AbstractContainerMenu container,
+                                    List<ItemStack> slots, ItemStack carried, int[] dataSlots) {
+            container.incrementStateId();
+            client.receiveInitialState(slots, carried);
         }
-        return true;
+
+        @Override
+        public void sendSlotChange(net.minecraft.world.inventory.AbstractContainerMenu container, int slot,
+                                   ItemStack stack) {
+            container.incrementStateId();
+            client.receiveSlot(slot, stack);
+        }
+
+        @Override
+        public void sendCarriedChange(net.minecraft.world.inventory.AbstractContainerMenu container, ItemStack carried) {
+            client.receiveCarried(carried);
+        }
+
+        @Override
+        public void sendDataChange(net.minecraft.world.inventory.AbstractContainerMenu container, int id, int value) {
+            // Card compilation predicates do not consume container data slots.
+        }
+
+        @Override
+        public RemoteSlot createSlot() {
+            return new MirroredRemoteSlot();
+        }
+    }
+
+    private static final class MirroredRemoteSlot implements RemoteSlot {
+        private ItemStack remote = ItemStack.EMPTY;
+
+        @Override
+        public void force(ItemStack stack) {
+            remote = stack.copy();
+        }
+
+        @Override
+        public void receive(net.minecraft.network.HashedStack incoming) {
+            remote = ItemStack.EMPTY;
+        }
+
+        @Override
+        public boolean matches(ItemStack stack) {
+            return ItemStack.matches(remote, stack);
+        }
     }
 
     private static boolean sameStack(ItemStack left, ItemStack right) {
