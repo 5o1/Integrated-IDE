@@ -20,7 +20,6 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private ItemStack pendingOutput = ItemStack.EMPTY;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
-    private boolean returningInputsAfterWrite;
 
     LogicProgrammerCardBuildPort(ContainerLogicProgrammerBase menu, Map<String, ItemStack> existingCards) {
         this.programmer = new LogicProgrammerGateway(menu);
@@ -35,13 +34,6 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
 
     @Override
     public String serverFailure() {
-        // Removing an input after its output has been written naturally makes
-        // the old active element invalid. The reset action immediately after
-        // cleanup clears that stale validation state, so it is not a build
-        // failure.
-        if (returningInputsAfterWrite) {
-            return null;
-        }
         if (errorBeforeAction == null) {
             return null;
         }
@@ -158,7 +150,6 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     public void returnOutput() {
         beforeServerAction();
         programmer.returnOutputToPlayer();
-        returningInputsAfterWrite = false;
     }
 
     @Override
@@ -186,7 +177,6 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         }
         int inputSlot = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
         if (!programmer.slotIsEmpty(inputSlot)) {
-            returningInputsAfterWrite = true;
             beforeServerAction();
             programmer.quickMove(player(), inputSlot);
         }
