@@ -17,6 +17,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private final Map<String, ItemStack> produced = new LinkedHashMap<>();
     private final Map<Integer, Integer> placedInputIds = new HashMap<>();
     private int pendingInputId = -1;
+    private int inputSourceSlot = -1;
     private int pendingOutputId = -1;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
@@ -79,6 +80,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
             throw new IllegalStateException("\u627e\u4e0d\u5230\u4e2d\u95f4\u53d8\u91cf\u5361\uff1b\u751f\u6210\u671f\u95f4\u8bf7\u52ff\u79fb\u52a8\u80cc\u5305\u7269\u54c1");
         }
         pendingInputId = inputId;
+        inputSourceSlot = sourceSlot;
         beforeServerAction();
         programmer.pickup(player, sourceSlot, 0);
     }
@@ -112,6 +114,26 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         int target = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
         return programmer.carriedItem().isEmpty()
                 && CardInventory.variableCardId(programmer.slotItem(target)) == expectedId;
+    }
+
+    @Override
+    public boolean returnHeldInput() {
+        if (programmer.carriedItem().isEmpty()) {
+            inputSourceSlot = -1;
+            return false;
+        }
+        if (inputSourceSlot < 0) {
+            throw new IllegalStateException("\u672a\u80fd\u5b9a\u4f4d\u8f93\u5165\u53d8\u91cf\u5361\u7684\u539f\u80cc\u5305\u683c\u3002");
+        }
+        beforeServerAction();
+        programmer.pickup(player(), inputSourceSlot, 0);
+        inputSourceSlot = -1;
+        return true;
+    }
+
+    @Override
+    public boolean inputCursorReturned() {
+        return programmer.carriedItem().isEmpty();
     }
 
     @Override

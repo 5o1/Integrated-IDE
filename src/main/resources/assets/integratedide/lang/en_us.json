@@ -30,6 +30,7 @@
   "integratedide.build.wait.input_slot": "Waiting for the server to create input slot %s…",
   "integratedide.build.wait.input_held": "Waiting for the server to synchronize input Variable Card %s…",
   "integratedide.build.wait.input_placed": "Waiting for the server to confirm input Variable Card %s…",
+  "integratedide.build.wait.input_cursor": "Waiting for the server to return input Variable Card %s to the cursor slot…",
   "integratedide.build.wait.blank_held": "Waiting for the server to synchronize a blank Variable Card…",
   "integratedide.build.wait.output_ready": "Waiting for the server to write the Variable Card output…",
   "integratedide.build.wait.remainder": "Waiting for the server to return blank Variable Card remainder…",

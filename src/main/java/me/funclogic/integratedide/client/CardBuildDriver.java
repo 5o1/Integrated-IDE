@@ -134,6 +134,8 @@ public final class CardBuildDriver {
             case WAIT_INPUT_HELD -> waitForInputHeld(step);
             case PLACE_INPUT -> placeInput();
             case WAIT_INPUT_PLACED -> waitForInputPlaced(step);
+            case RETURN_INPUT_CURSOR -> returnInputCursor(step);
+            case WAIT_INPUT_CURSOR_RETURNED -> waitForInputCursorReturned(step);
             case PICK_BLANK -> pickupBlank();
             case WAIT_BLANK_HELD -> waitForBlankHeld();
             case PLACE_BLANK -> placeBlank();
@@ -202,9 +204,31 @@ public final class CardBuildDriver {
         if (!synchronizedAfterCommand() || !port.inputPlaced(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_placed", inputIndex + 1));
         }
+        phase = Phase.RETURN_INPUT_CURSOR;
+        return true;
+    }
+
+    private boolean returnInputCursor(ExpressionCompiler.CardStep step) {
+        commandRevision = port.synchronizationRevision();
+        if (!port.returnHeldInput()) {
+            advanceInput(step);
+            return true;
+        }
+        phase = Phase.WAIT_INPUT_CURSOR_RETURNED;
+        return false;
+    }
+
+    private boolean waitForInputCursorReturned(ExpressionCompiler.CardStep step) {
+        if (!synchronizedAfterCommand() || !port.inputCursorReturned()) {
+            return waiting(Component.translatable("integratedide.build.wait.input_cursor", inputIndex + 1));
+        }
+        advanceInput(step);
+        return true;
+    }
+
+    private void advanceInput(ExpressionCompiler.CardStep step) {
         inputIndex++;
         phase = inputIndex < step.inputs().size() ? Phase.WAIT_INPUT_SLOT : Phase.PICK_BLANK;
-        return true;
     }
 
     private boolean pickupBlank() {
@@ -335,7 +359,7 @@ public final class CardBuildDriver {
 
     private enum Phase {
         IDLE, SELECT, CONFIGURE, WAIT_INPUT_SLOT, PICK_INPUT, WAIT_INPUT_HELD, PLACE_INPUT,
-        WAIT_INPUT_PLACED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
+        WAIT_INPUT_PLACED, RETURN_INPUT_CURSOR, WAIT_INPUT_CURSOR_RETURNED, PICK_BLANK, WAIT_BLANK_HELD, PLACE_BLANK, WAIT_OUTPUT_READY,
         RETURN_REMAINDER, WAIT_REMAINDER_RETURNED, CLEANUP_INPUT, WAIT_INPUT_RETURNED,
         RETURN_OUTPUT, WAIT_OUTPUT_RETURNED, CONFIRM_OUTPUT, COMPLETE, CANCELLED, FAILED
     }

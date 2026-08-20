@@ -37,6 +37,15 @@ public interface CardBuildPort {
 
     boolean inputPlaced(int inputIndex, String stepId);
 
+    /**
+     * Returns the Variable Card still held after programming a reference-style
+     * input slot. Returns {@code true} only when a server container action was
+     * sent; an already-empty cursor needs no synchronization wait.
+     */
+    boolean returnHeldInput();
+
+    boolean inputCursorReturned();
+
     void pickupBlank();
 
     boolean blankHeld();

@@ -272,6 +272,7 @@ class CardBuildWorkflowTest {
         private long synchronizationRevision;
         private int pendingInputId = -1;
         private int pendingOutputId = -1;
+        private int inputSourceSlot = -1;
         private int blankSourceSlot = -1;
         private String errorBeforeAction;
         private int returnOutputRequests;
@@ -459,6 +460,7 @@ class CardBuildWorkflowTest {
                 throw new IllegalStateException("The synchronized inventory no longer contains input " + stepId);
             }
             pendingInputId = inputId;
+            inputSourceSlot = sourceSlot;
             beforeServerAction("pick input " + stepId);
             serverMenu.clicked(sourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
         }
@@ -495,6 +497,26 @@ class CardBuildWorkflowTest {
                         + variableCardId(snapshot.slot(target)) + ", carried=" + describe(snapshot.carried));
             }
             return placed;
+        }
+
+        @Override
+        public boolean returnHeldInput() {
+            if (snapshot.carried.isEmpty()) {
+                inputSourceSlot = -1;
+                return false;
+            }
+            if (inputSourceSlot < 0) {
+                throw new IllegalStateException("No source slot is available for the held input card.");
+            }
+            beforeServerAction("return held input");
+            serverMenu.clicked(inputSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
+            inputSourceSlot = -1;
+            return true;
+        }
+
+        @Override
+        public boolean inputCursorReturned() {
+            return snapshot.carried.isEmpty();
         }
 
         @Override
