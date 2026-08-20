@@ -174,25 +174,33 @@ class CardBuildWorkflowTest {
         return new BuildRun(compilation, port, driver);
     }
 
-    /**
-     * A test safety guard, not a time-based protocol. Each iteration performs
-     * one client driver pass and then exactly one explicit container-delta
-     * flush. A missing state change leaves the driver waiting.
-     */
     private static void drainAfterEveryServerSnapshot(BuildRun run) {
-        for (int exchanges = 0; exchanges < 256 && run.driver.isRunning(); exchanges++) {
+        while (run.driver.isRunning()) {
+            long revisionBeforeTick = run.port.synchronizationRevision();
+            int commandsBeforeTick = run.port.commandCount();
             run.driver.tick();
+            if (!run.driver.isRunning()) {
+                break;
+            }
             run.port.flushServerChanges();
+            if (run.port.synchronizationRevision() == revisionBeforeTick) {
+                throw new AssertionError("The server emitted no container synchronization after "
+                        + (run.port.commandCount() == commandsBeforeTick ? "the pending transition" : "command")
+                        + ". " + run.port.describeState());
+            }
         }
-        assertFalse(run.driver.isRunning(), "The real Logic Programmer workflow did not reach a terminal state: "
-                + run.driver.status());
     }
 
     private static void advanceUntilFirstOutputReturnIsSent(BuildRun run) {
-        for (int exchanges = 0; exchanges < 128 && run.port.returnOutputRequests == 0; exchanges++) {
+        while (run.port.returnOutputRequests == 0) {
+            long revisionBeforeTick = run.port.synchronizationRevision();
             run.driver.tick();
             if (run.port.returnOutputRequests == 0) {
                 run.port.flushServerChanges();
+                if (run.port.synchronizationRevision() == revisionBeforeTick) {
+                    throw new AssertionError("The server emitted no container synchronization before the first "
+                            + "output return. " + run.port.describeState());
+                }
             }
         }
         assertEquals(1, run.port.returnOutputRequests,
@@ -231,6 +239,7 @@ class CardBuildWorkflowTest {
         private final Map<String, ItemStack> produced = new LinkedHashMap<>();
         private final Map<Integer, ItemStack> placedInputs = new LinkedHashMap<>();
         private final List<String> confirmedStepIds = new ArrayList<>();
+        private final List<String> synchronizationTrace = new ArrayList<>();
         private ObservedMenuState snapshot;
         private long synchronizationRevision;
         private ItemStack pendingInput = ItemStack.EMPTY;
@@ -238,6 +247,8 @@ class CardBuildWorkflowTest {
         private int blankSourceSlot = -1;
         private String errorBeforeAction;
         private int returnOutputRequests;
+        private int commandCount;
+        private String lastCommand = "initial menu state";
 
         private ServerDrivenProgrammer(ServerLevel level, ServerPlayer serverPlayer, ServerPlayer clientPlayer,
                                        ContainerLogicProgrammer serverMenu, ContainerLogicProgrammer clientMenu) {
@@ -285,18 +296,34 @@ class CardBuildWorkflowTest {
             clientMenu.initializeContents(stateId, slots, carried);
             snapshot = ObservedMenuState.capture(clientMenu);
             synchronizationRevision++;
+            trace("initial state=" + stateId + ", slots=" + slots.size() + ", carried=" + describe(carried));
         }
 
         private void receiveSlot(int stateId, int slot, ItemStack stack) {
             clientMenu.setItem(slot, stateId, stack);
             snapshot = ObservedMenuState.capture(clientMenu);
             synchronizationRevision++;
+            trace("slot state=" + stateId + ", index=" + slot + ", value=" + describe(stack));
         }
 
         private void receiveCarried(ItemStack carried) {
             clientMenu.setCarried(carried);
             snapshot = ObservedMenuState.capture(clientMenu);
             synchronizationRevision++;
+            trace("carried=" + describe(carried));
+        }
+
+        int commandCount() {
+            return commandCount;
+        }
+
+        String describeState() {
+            ItemStack clientWrite = snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu));
+            return "last command=" + lastCommand + ", revision=" + synchronizationRevision
+                    + ", client write=" + describe(clientWrite) + ", expected output=" + describe(pendingOutput)
+                    + ", client received=" + describe(findReceivedPlayerStack(pendingOutput))
+                    + ", server received=" + describe(findServerPlayerStack(pendingOutput))
+                    + ", trace=" + synchronizationTrace;
         }
 
         boolean serverHasReturnedCurrentOutput() {
@@ -534,6 +561,26 @@ class CardBuildWorkflowTest {
 
         private void beforeServerAction() {
             errorBeforeAction = errorText();
+            commandCount++;
+            lastCommand = "action " + commandCount;
+            trace("command " + commandCount);
+        }
+
+        private void trace(String event) {
+            if (synchronizationTrace.size() == 32) {
+                synchronizationTrace.removeFirst();
+            }
+            synchronizationTrace.add(event);
+        }
+
+        private static String describe(ItemStack stack) {
+            if (stack == null) {
+                return "none";
+            }
+            if (stack.isEmpty()) {
+                return "empty";
+            }
+            return stack.getItem() + " x" + stack.getCount() + " " + stack.getComponentsPatch();
         }
 
         private int findBlankSlot() {

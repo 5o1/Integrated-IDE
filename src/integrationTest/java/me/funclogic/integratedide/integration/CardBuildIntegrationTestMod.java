@@ -21,19 +21,27 @@ public final class CardBuildIntegrationTestMod {
     }
 
     private void runAssertions(ServerStartedEvent event) {
+        int exitCode;
         try {
             CardBuildWorkflowTest.verify(event.getServer());
             LOGGER.info("Integrated IDE real Logic Programmer integration tests passed.");
-            // This handler runs on the server thread. Calling halt here makes
-            // that thread wait for itself; direct process exit is the only
-            // deterministic terminal signal for this isolated CI JVM.
-            System.exit(0);
+            exitCode = 0;
         } catch (RuntimeException | AssertionError error) {
             LOGGER.error("Integrated IDE real Logic Programmer integration test failed.", error);
-            // NeoForge logs and continues after exceptions from lifecycle
-            // listeners. Terminate this test-only JVM explicitly so a failed
-            // server workflow can never produce a green Gradle build.
-            System.exit(1);
+            exitCode = 1;
         }
+        stopFromOutsideTheServerThread(event.getServer(), exitCode);
+    }
+
+    /**
+     * The lifecycle callback itself runs on the server thread. Stopping from
+     * that thread makes the server wait for itself, so this dedicated test
+     * thread is triggered directly by the completed matrix instead.
+     */
+    private static void stopFromOutsideTheServerThread(net.minecraft.server.MinecraftServer server, int exitCode) {
+        Thread.ofPlatform().name("Integrated IDE integration-test shutdown").start(() -> {
+            server.halt(true);
+            System.exit(exitCode);
+        });
     }
 }
