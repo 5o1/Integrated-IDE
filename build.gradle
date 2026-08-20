@@ -88,7 +88,6 @@ neoForge {
             server()
             programArgument '--nogui'
             sourceSet = sourceSets.test
-            loadedMods = [mods.integratedideTest]
         }
 
         data {
