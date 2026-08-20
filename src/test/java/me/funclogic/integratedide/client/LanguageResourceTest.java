@@ -6,9 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 /** Ensures resource-pack language files remain parseable and translation-complete. */
@@ -23,7 +22,12 @@ class LanguageResourceTest {
     }
 
     private static JsonObject read(String filename) throws IOException {
-        Path resource = Path.of("src", "main", "resources", "assets", "integratedide", "lang", filename);
-        return JsonParser.parseString(Files.readString(resource, StandardCharsets.UTF_8)).getAsJsonObject();
+        String path = "assets/integratedide/lang/" + filename;
+        try (InputStream resource = LanguageResourceTest.class.getClassLoader().getResourceAsStream(path)) {
+            if (resource == null) {
+                throw new IOException("Missing packaged language resource: " + path);
+            }
+            return JsonParser.parseString(new String(resource.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+        }
     }
 }

@@ -155,6 +155,14 @@ class ExpressionCompilerTest {
             }
 
             @Override
+            public ExpressionCompiler.StepKind literalStepKind(ExpressionCompiler.LiteralKind kind,
+                                                                ExpressionCompiler.TypeInfo type) {
+                return kind == ExpressionCompiler.LiteralKind.ITEM && type.equals(FLUID)
+                        ? ExpressionCompiler.StepKind.STATIC_FLUID
+                        : ExpressionCompiler.Catalog.super.literalStepKind(kind, type);
+            }
+
+            @Override
             public boolean isAssignable(ExpressionCompiler.TypeInfo actual, ExpressionCompiler.TypeInfo expected) {
                 return actual.equals(expected);
             }

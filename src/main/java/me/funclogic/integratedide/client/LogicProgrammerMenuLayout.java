@@ -61,7 +61,7 @@ final class LogicProgrammerMenuLayout {
         for (int index = 0; index < slots.size(); index++) {
             Slot slot = slots.get(index);
             if (slot.container == temporaryInputs) {
-                inputs.add(new IndexedSlot(index, slot.index));
+                inputs.add(new IndexedSlot(index, slot.getContainerSlot()));
             }
         }
         inputs.sort(Comparator.comparingInt(IndexedSlot::containerIndex));

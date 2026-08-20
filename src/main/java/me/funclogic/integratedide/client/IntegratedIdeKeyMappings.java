@@ -6,6 +6,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.extensions.IKeyMappingExtension;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import net.neoforged.neoforge.client.settings.KeyModifier;
 import org.lwjgl.glfw.GLFW;
@@ -31,10 +32,27 @@ public final class IntegratedIdeKeyMappings {
     }
 
     static boolean matchesCompile(KeyEvent event) {
-        return COMPILE_NOVEL.matches(event);
+        return matches(COMPILE_NOVEL, event);
     }
 
     static boolean matchesCompletion(KeyEvent event) {
-        return REQUEST_COMPLETION.matches(event);
+        return matches(REQUEST_COMPLETION, event);
+    }
+
+    /**
+     * KeyMapping.matches checks the key code but reads modifier state from the
+     * live window. Screen events already carry that state, so compare against
+     * the current user binding directly; this preserves both Ctrl defaults and
+     * arbitrary rebinding from Minecraft's Controls screen.
+     */
+    private static boolean matches(KeyMapping mapping, KeyEvent event) {
+        IKeyMappingExtension extended = (IKeyMappingExtension) (Object) mapping;
+        return extended.getKey().equals(InputConstants.getKey(event)) && switch (extended.getKeyModifier()) {
+            case CONTROL -> event.hasControlDown();
+            case CONTROL_OR_COMMAND -> event.hasControlDownWithQuirk();
+            case SHIFT -> event.hasShiftDown();
+            case ALT -> event.hasAltDown();
+            case NONE -> !event.hasControlDown() && !event.hasShiftDown() && !event.hasAltDown();
+        };
     }
 }

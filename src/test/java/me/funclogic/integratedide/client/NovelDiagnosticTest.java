@@ -1,8 +1,9 @@
 package me.funclogic.integratedide.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 
 class NovelDiagnosticTest {
@@ -12,7 +13,9 @@ class NovelDiagnosticTest {
         NovelDiagnostic diagnostic = NovelDiagnostic.compilation(compilation);
 
         assertEquals(NovelDiagnostic.Severity.ERROR, diagnostic.severity());
-        assertTrue(diagnostic.text().getString().contains(compilation.message()));
+        TranslatableContents contents = assertInstanceOf(TranslatableContents.class, diagnostic.text().getContents());
+        assertEquals("integratedide.diagnostic.compilation", contents.getKey());
+        assertEquals(compilation.message(), contents.getArgs()[0]);
     }
 
     @Test
@@ -22,6 +25,8 @@ class NovelDiagnosticTest {
                 RuntimeExpressionValidator.Result.failure("Missing test operator"));
 
         assertEquals(NovelDiagnostic.Severity.ERROR, diagnostic.severity());
-        assertTrue(diagnostic.text().getString().contains("Missing test operator"));
+        TranslatableContents contents = assertInstanceOf(TranslatableContents.class, diagnostic.text().getContents());
+        assertEquals("integratedide.diagnostic.runtime", contents.getKey());
+        assertEquals("Missing test operator", contents.getArgs()[0]);
     }
 }
