@@ -1,11 +1,13 @@
 package me.funclogic.integratedide.client;
 
+import com.mojang.logging.LogUtils;
 import java.util.List;
 import java.util.Map;
 import me.funclogic.integratedide.expr.ExpressionCompiler;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
+import org.slf4j.Logger;
 
 /**
  * Advances one card build at a time. Menu packets and inventory mutation are
@@ -14,12 +16,15 @@ import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgramm
  */
 public final class CardBuildDriver {
     private static final int TICKS_BETWEEN_ACTIONS = 3;
+    private static final int MAX_OUTPUT_WAIT_TICKS = 200;
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private final CardBuildPort port;
     private final List<ExpressionCompiler.CardStep> steps;
     private int stepIndex;
     private int inputIndex;
     private int cooldown;
+    private int outputWaitTicks;
     private Phase phase = Phase.IDLE;
     private String status = "\u7b49\u5f85\u5f00\u59cb";
 
@@ -154,14 +159,22 @@ public final class CardBuildDriver {
     private void returnRemainder() {
         port.returnBlankRemainder();
         phase = Phase.WAIT_FOR_OUTPUT;
+        outputWaitTicks = 0;
         cooldown = 8;
     }
 
     private void waitForOutput() {
         if (!port.outputReady()) {
+            outputWaitTicks += TICKS_BETWEEN_ACTIONS;
+            if (outputWaitTicks > MAX_OUTPUT_WAIT_TICKS) {
+                throw new IllegalStateException("等待第 " + (stepIndex + 1) + "/" + steps.size()
+                        + " 张变量卡的输出超时；请检查逻辑编程器中的输入卡类型和背包空间");
+            }
+            status = "正在等待第 " + (stepIndex + 1) + "/" + steps.size() + " 张变量卡的输出…";
             cooldown = 2;
             return;
         }
+        outputWaitTicks = 0;
         phase = Phase.STORE_OUTPUT;
     }
 
@@ -197,6 +210,8 @@ public final class CardBuildDriver {
     }
 
     private void fail(String message) {
+        String step = steps.isEmpty() ? "none" : Integer.toString(Math.min(stepIndex + 1, steps.size()));
+        LOGGER.warn("Integrated IDE stopped card build at step {}/{} in {}: {}", step, steps.size(), phase, message);
         phase = Phase.FAILED;
         status = "\u5df2\u505c\u6b62\uff1a" + message;
     }

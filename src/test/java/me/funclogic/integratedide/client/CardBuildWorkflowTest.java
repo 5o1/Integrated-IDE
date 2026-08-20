@@ -141,6 +141,21 @@ class CardBuildWorkflowTest {
         assertTrue(driver.status().contains("\u7a7a\u767d Variable Card"), driver.status());
     }
 
+    @Test
+    void reportsAnOutputTimeoutInsteadOfSilentlyStoppingAfterTheFirstCard() {
+        ExpressionCompiler.Compilation compilation = LogicProgrammerCatalog.create().compile(USER_EXPRESSION);
+        assertTrue(compilation.valid(), compilation.message());
+
+        InMemoryLogicProgrammer port = new InMemoryLogicProgrammer(12, 1);
+        CardBuildDriver driver = new CardBuildDriver(port, compilation.steps());
+        driver.start();
+        drain(driver);
+
+        assertTrue(driver.isFailed());
+        assertEquals(1, port.confirmedStepIds.size());
+        assertTrue(driver.status().contains("\u8f93\u51fa\u8d85\u65f6"), driver.status());
+    }
+
     private static void drain(CardBuildDriver driver) {
         for (int tick = 0; tick < 1_000 && driver.isRunning(); tick++) {
             driver.tick();
@@ -152,6 +167,7 @@ class CardBuildWorkflowTest {
         private final Map<String, ItemStack> cards = new LinkedHashMap<>();
         private final List<String> confirmedStepIds = new ArrayList<>();
         private final List<String> selectedInputs = new ArrayList<>();
+        private final int maximumOutputs;
         private int remainingBlankCards;
         private int blankCardsConsumed;
         private String activeStepId;
@@ -159,7 +175,12 @@ class CardBuildWorkflowTest {
         private boolean outputReady;
 
         private InMemoryLogicProgrammer(int blankCards) {
+            this(blankCards, Integer.MAX_VALUE);
+        }
+
+        private InMemoryLogicProgrammer(int blankCards, int maximumOutputs) {
             this.remainingBlankCards = blankCards;
+            this.maximumOutputs = maximumOutputs;
         }
 
         private void preload(Map<String, ItemStack> existingCards) {
@@ -217,7 +238,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public boolean outputReady() {
-            return outputReady;
+            return outputReady && confirmedStepIds.size() < maximumOutputs;
         }
 
         @Override

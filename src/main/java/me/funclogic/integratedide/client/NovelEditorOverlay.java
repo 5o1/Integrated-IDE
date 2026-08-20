@@ -64,7 +64,7 @@ final class NovelEditorOverlay {
     private CardBuildDriver driver;
     private NovelCompilationCache.Reconciliation activeReconciliation;
     private List<NovelCompilationCache.MissingNode> missingCachedNodes = List.of();
-    private String status = "\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210";
+    private NovelDiagnostic diagnostic = NovelDiagnostic.info("\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210");
     private int statusScrollLine;
     private int selectedCompletion;
     private PopupMode popupMode = PopupMode.NONE;
@@ -103,7 +103,7 @@ final class NovelEditorOverlay {
         this.completionAvailable = CompletionEditorAccess.setCursorListener(editor, this::cursorChanged);
         this.editor.setValue(session.source());
         if (!completionAvailable) {
-            this.status = "\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002";
+            setError("\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002");
         }
         setNovelMode(false);
     }
@@ -191,6 +191,10 @@ final class NovelEditorOverlay {
             return true;
         }
         if (event.isEscape()) {
+            if (driver != null && driver.isRunning()) {
+                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u65e0\u6cd5\u5173\u95ed Novel \u6a21\u5f0f\u3002");
+                return true;
+            }
             setNovelMode(false);
             return true;
         }
@@ -216,7 +220,7 @@ final class NovelEditorOverlay {
             return true;
         }
         if (insideNativeCardSlot(event.x(), event.y())) {
-            status = "\u961f\u5217\u4f7f\u7528\u80cc\u5305\u4e2d\u7684\u7a7a\u767d Variable Card\u3002";
+            setInfo("\u961f\u5217\u4f7f\u7528\u80cc\u5305\u4e2d\u7684\u7a7a\u767d Variable Card\u3002");
             return true;
         }
         if (insideStatusArea(event.x(), event.y())) {
@@ -328,7 +332,7 @@ final class NovelEditorOverlay {
         completionExplicitlyRequested = false;
         compilation = catalog.compile(editor.getValue());
         previewReconciliation = compilation.valid() ? session.reconcile(compilation) : null;
-        status = validationStatus(compilation);
+        reportValidation(compilation);
         refreshCompletions();
     }
 
@@ -341,7 +345,11 @@ final class NovelEditorOverlay {
         NovelSessionStore.flushIfDue();
         if (driver != null && driver.isRunning()) {
             driver.tick();
-            status = driver.status();
+            setDiagnostic(driver.isFailed() ? NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status())
+                    : NovelDiagnostic.info(driver.status()));
+            if (!driver.isRunning()) {
+                editor.active = novelMode;
+            }
         }
         finalizeCompletedBuild();
     }
@@ -352,17 +360,18 @@ final class NovelEditorOverlay {
         // second invocation can reuse its Variable Cards.
         finalizeCompletedBuild();
         if (driver != null && driver.isRunning()) {
+            setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff1a" + driver.status());
             return;
         }
         compilation = catalog.compile(editor.getValue());
         previewReconciliation = compilation.valid() ? session.reconcile(compilation) : null;
         if (!compilation.valid()) {
-            status = compilation.message();
+            setDiagnostic(NovelDiagnostic.compilation(compilation));
             return;
         }
         RuntimeExpressionValidator.Result runtime = RuntimeExpressionValidator.validate(compilation);
         if (!runtime.valid()) {
-            status = runtime.message();
+            setDiagnostic(NovelDiagnostic.runtime(compilation, runtime));
             return;
         }
         compileAndBuildFromCache();
@@ -375,7 +384,7 @@ final class NovelEditorOverlay {
         session.commit(compilation, activeReconciliation, driver.producedCards());
         previewReconciliation = session.reconcile(compilation);
         buildCommitted = true;
-        status = "\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002";
+        setInfo("\u5b8c\u6210\uff1a\u5df2\u521b\u5efa " + activeCreatedCards + " \u5f20\u53d8\u91cf\u5361\u3002");
     }
 
     private void compileAndBuildFromCache() {
@@ -386,13 +395,14 @@ final class NovelEditorOverlay {
                 player, forceRebuild);
         if (selection.hasMissingExternal()) {
             NovelCompilationCache.MissingNode missing = selection.missingExternal();
-            status = "外部变量卡 {" + missing.variableCardId() + "} 不在背包中，或类型不符合当前参数。";
+            setError("构建失败\n外部变量卡 {" + missing.variableCardId() + "} 不在背包中，或类型不符合当前参数。");
             return;
         }
         if (selection.needsRebuildConfirmation()) {
             missingCachedNodes = selection.missingCachedNodes();
             rebuildConfirmationSource = editor.getValue();
-            status = "缺少 " + missingCachedNodes.size() + " 个缓存变量卡；再次按 Ctrl+Enter 将重编译它们及其依赖者。";
+            setError("构建需要确认\n缺少 " + missingCachedNodes.size()
+                    + " 个缓存变量卡；再次按 Ctrl+Enter 将重编译它们及其依赖者。");
             return;
         }
         missingCachedNodes = List.of();
@@ -401,32 +411,53 @@ final class NovelEditorOverlay {
         int available = CardBuildDriver.countBlankVariableCards(player);
         int freeSlots = CardInventory.countEmptyPlayerSlots(player);
         if (available < required) {
-            status = "空白 Variable Card 不足：需要 " + required + "，背包中有 " + available + "。";
+            setError("构建失败\n空白 Variable Card 不足：需要 " + required + "，背包中有 " + available + "。");
             return;
         }
         if (freeSlots < required) {
-            status = "背包空槽不足：需要 " + required + "，剩余 " + freeSlots + "。";
+            setError("构建失败\n背包空槽不足：需要 " + required + "，剩余 " + freeSlots + "。");
             return;
         }
         if (required == 0) {
             session.commit(compilation, activeReconciliation, selection.availableCards());
             previewReconciliation = session.reconcile(compilation);
-            status = "无需新建变量卡，已复用缓存图。";
+            setInfo("无需新建变量卡，已复用缓存图。");
             return;
         }
         driver = new CardBuildDriver(menu, selection.stepsToBuild(), selection.availableCards());
         activeCreatedCards = required;
         buildCommitted = false;
         driver.start();
+        editor.active = !driver.isRunning();
+        if (driver.isFailed()) {
+            setDiagnostic(NovelDiagnostic.error("\u6784\u5efa\u5931\u8d25\n" + driver.status()));
+        }
         return;
     }
 
-    private String validationStatus(ExpressionCompiler.Compilation checked) {
+    private void reportValidation(ExpressionCompiler.Compilation checked) {
         if (!checked.valid()) {
-            return checked.message();
+            setDiagnostic(NovelDiagnostic.compilation(checked));
+            return;
         }
-        RuntimeExpressionValidator.Result runtime = RuntimeExpressionValidator.validate(checked);
-        return runtime.valid() ? checked.message() + "  " + runtime.message() : runtime.message();
+        setDiagnostic(NovelDiagnostic.runtime(checked, RuntimeExpressionValidator.validate(checked)));
+    }
+
+    private void setInfo(String message) {
+        setDiagnostic(NovelDiagnostic.info(message));
+    }
+
+    private void setError(String message) {
+        setDiagnostic(NovelDiagnostic.error(message));
+    }
+
+    /**
+     * Every replacement starts at the first diagnostic line. Without this,
+     * an old scrollbar position can hide a new compiler error entirely.
+     */
+    private void setDiagnostic(NovelDiagnostic next) {
+        diagnostic = next;
+        statusScrollLine = 0;
     }
 
     private void refreshCompletions() {
@@ -458,7 +489,7 @@ final class NovelEditorOverlay {
         if (!CompletionEditorAccess.replaceCurrentToken(editor, completions.get(index).insertion())) {
             completions = List.of();
             popupMode = PopupMode.NONE;
-            status = "\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002";
+            setError("\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002");
             return;
         }
         refreshCompletions();
@@ -508,7 +539,7 @@ final class NovelEditorOverlay {
     }
 
     private List<FormattedCharSequence> statusLines() {
-        return font.split(Component.literal(status), statusTextWidth());
+        return font.split(Component.literal(diagnostic.text()), statusTextWidth());
     }
 
     private int maxStatusScroll() {
@@ -975,13 +1006,7 @@ final class NovelEditorOverlay {
     }
 
     private int statusColor() {
-        if (driver != null && driver.isFailed()) {
-            return 0xFFE08080;
-        }
-        if (compilation != null && !compilation.valid()) {
-            return 0xFFE08080;
-        }
-        if (!missingCachedNodes.isEmpty()) {
+        if (diagnostic.severity() == NovelDiagnostic.Severity.ERROR) {
             return 0xFFE08080;
         }
         return 0xFF9CCF9C;
@@ -1099,6 +1124,10 @@ final class NovelEditorOverlay {
 
         @Override
         public void onClick(MouseButtonEvent event, boolean doubleClick) {
+            if (driver != null && driver.isRunning()) {
+                setInfo("\u6b63\u5728\u751f\u6210\u53d8\u91cf\u5361\uff0c\u6682\u65f6\u4e0d\u80fd\u5207\u6362\u6a21\u5f0f\u3002");
+                return;
+            }
             setNovelMode(!novelMode);
         }
 
