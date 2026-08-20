@@ -524,7 +524,7 @@ class CardBuildWorkflowTest {
         }
 
         static ObservedMenuState capture(ContainerLogicProgrammerBase menu, ServerPlayer player) {
-            List<ItemStack> slots = menu.slots.stream().map(ItemStack::copy).toList();
+            List<ItemStack> slots = menu.slots.stream().map(slot -> slot.getItem().copy()).toList();
             List<ItemStack> inventory = player.getInventory().getNonEquipmentItems().stream().map(ItemStack::copy).toList();
             String error = menu.getLastError() == null ? "" : menu.getLastError().getString();
             return new ObservedMenuState(slots, menu.getCarried().copy(), inventory, error);
