@@ -44,6 +44,18 @@ repositories {
     }
 }
 
+// Keep the FML-backed JUnit suite and the launchable server harness apart.
+// The latter has its own mod metadata and must never be visible to Gradle's
+// JUnit worker or the release JAR.
+sourceSets {
+    integrationTest {
+        java.srcDir('src/integrationTest/java')
+        resources.srcDir('src/integrationTest/resources')
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
 base {
     archivesName = mod_id
 }
@@ -87,7 +99,7 @@ neoForge {
         integrationTestServer {
             server()
             programArgument '--nogui'
-            sourceSet = sourceSets.test
+            sourceSet = sourceSets.integrationTest
         }
 
         data {
@@ -123,7 +135,7 @@ neoForge {
             sourceSet(sourceSets.main)
         }
         integratedideTest {
-            sourceSet(sourceSets.test)
+            sourceSet(sourceSets.integrationTest)
         }
     }
 
@@ -144,6 +156,8 @@ configurations {
     // FML-backed JUnit must also discover optional runtime mods such as
     // Integrated Dynamics; otherwise its real operator registry is absent.
     testRuntimeClasspath.extendsFrom localRuntime
+    integrationTestCompileOnly.extendsFrom compileOnly
+    integrationTestRuntimeClasspath.extendsFrom localRuntime
 }
 
 dependencies {
