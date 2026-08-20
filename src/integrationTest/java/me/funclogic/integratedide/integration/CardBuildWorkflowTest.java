@@ -538,7 +538,15 @@ class CardBuildWorkflowTest {
             var element = valueType.createLogicProgrammerElement();
             Identifier elementType = LogicProgrammerElementTypes.VALUETYPE.getUniqueName();
             Identifier elementId = LogicProgrammerElementTypes.VALUETYPE.getName(element);
-            clientMenu.setActiveElementById(elementType, elementId);
+            // Ingredients exposes a client-only element implementation. The
+            // headless server harness cannot instantiate it, but static
+            // ingredient cards have no temporary input slots, so their
+            // container topology is identical to the already mirrored empty
+            // client layout. The actual server selection and value packet
+            // below are still exercised.
+            if (step.kind() != ExpressionCompiler.StepKind.STATIC_TAG) {
+                clientMenu.setActiveElementById(elementType, elementId);
+            }
             new LogicProgrammerActivateElementPacket(elementType, elementId).actionServer(level, serverPlayer);
         }
 
