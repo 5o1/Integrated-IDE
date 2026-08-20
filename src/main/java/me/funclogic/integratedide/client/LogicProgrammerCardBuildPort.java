@@ -112,8 +112,10 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
             return false;
         }
         int target = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
-        return programmer.carriedItem().isEmpty()
-                && CardInventory.variableCardId(programmer.slotItem(target)) == expectedId;
+        // Dynamic's temporary operator inputs retain a Variable Card
+        // reference; they do not consume the cursor stack. The cursor is
+        // returned in the following explicit transition.
+        return CardInventory.variableCardId(programmer.slotItem(target)) == expectedId;
     }
 
     @Override

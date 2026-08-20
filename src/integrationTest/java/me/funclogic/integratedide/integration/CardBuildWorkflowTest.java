@@ -59,6 +59,8 @@ class CardBuildWorkflowTest {
                 () -> materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(server));
         runCase(failures, "three-card anyConstant expression",
                 () -> materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(server));
+        runCase(failures, "reference input cursor protocol",
+                () -> predictsTheReferenceInputClickThenWaitsForItsExplicitServerReturn(server));
         runCase(failures, "separate one-card blank stacks",
                 () -> materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server));
         runCase(failures, "virtual-variable reuse",
@@ -109,6 +111,37 @@ class CardBuildWorkflowTest {
         assertTrue(run.driver.isComplete(), run.driver.status());
         assertEquals(List.of("v0", "v1", "v2"), run.port.confirmedStepIds);
         assertEquals(3, run.port.validCardsInPlayerInventory());
+    }
+
+    /**
+     * Dynamic operator inputs are references: clicking their slot keeps the
+     * source Variable Card on the cursor while the slot records that
+     * reference. The live client predicts that click before its packet reaches
+     * the server. This assertion prevents the harness from modelling only the
+     * server half of a container click and accidentally requiring an empty
+     * cursor at the wrong transition.
+     */
+    private static void predictsTheReferenceInputClickThenWaitsForItsExplicitServerReturn(MinecraftServer server) {
+        BuildRun run = start(server, "anyConstant(1, 1)", 3);
+
+        advanceUntilFirstInputPlacementIsSent(run);
+
+        assertTrue(run.port.clientInputContainsPendingReference(),
+                "The client prediction must show the reference in Dynamic's first input slot.");
+        assertTrue(run.port.clientCursorStillContainsPendingReference(),
+                "A reference input must leave the source Variable Card on the client cursor.");
+
+        run.port.flushServerChanges();
+        run.driver.tick();
+        assertTrue(run.port.hasSentInputCursorReturn(),
+                "The driver must return the predicted cursor card through a separate container click.");
+        run.port.flushServerChanges();
+        run.driver.tick();
+
+        assertTrue(run.port.clientCursorIsEmpty(),
+                "The input-card return must be confirmed by a newer server snapshot.");
+        drainAfterEveryServerSnapshot(run);
+        assertTrue(run.driver.isComplete(), run.driver.status());
     }
 
     private static void materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(MinecraftServer server) {
@@ -232,6 +265,20 @@ class CardBuildWorkflowTest {
         }
         assertEquals(1, run.port.returnOutputRequests,
                 "The test did not reach the first real reset-packet transition.");
+    }
+
+    private static void advanceUntilFirstInputPlacementIsSent(BuildRun run) {
+        while (!run.port.hasSentFirstInputPlacement()) {
+            long revisionBeforeTick = run.port.synchronizationRevision();
+            run.driver.tick();
+            if (!run.port.hasSentFirstInputPlacement()) {
+                run.port.flushServerChanges();
+                if (run.port.synchronizationRevision() == revisionBeforeTick) {
+                    throw new AssertionError("The server emitted no container synchronization before the first "
+                            + "reference-input placement. " + run.port.describeState());
+                }
+            }
+        }
     }
 
     private static void assertValidVariableCard(ServerLevel level, ItemStack stack, String message) {
@@ -383,6 +430,30 @@ class CardBuildWorkflowTest {
             return cards;
         }
 
+        boolean hasSentFirstInputPlacement() {
+            return "place input 1".equals(lastCommand);
+        }
+
+        boolean clientInputContainsPendingReference() {
+            if (!hasSentFirstInputPlacement()) {
+                return false;
+            }
+            int inputSlot = LogicProgrammerMenuLayout.inputSlot(clientMenu, 0);
+            return variableCardId(snapshot.slot(inputSlot)) == pendingInputId;
+        }
+
+        boolean clientCursorStillContainsPendingReference() {
+            return variableCardId(snapshot.carried) == pendingInputId;
+        }
+
+        boolean hasSentInputCursorReturn() {
+            return "return held input".equals(lastCommand);
+        }
+
+        boolean clientCursorIsEmpty() {
+            return snapshot.carried.isEmpty();
+        }
+
         @Override
         public boolean isCurrent() {
             return serverPlayer.containerMenu == serverMenu && clientPlayer.containerMenu == clientMenu;
@@ -461,8 +532,7 @@ class CardBuildWorkflowTest {
             }
             pendingInputId = inputId;
             inputSourceSlot = sourceSlot;
-            beforeServerAction("pick input " + stepId);
-            serverMenu.clicked(sourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
+            click("pick input " + stepId, sourceSlot, 0, ContainerInput.PICKUP);
         }
 
         @Override
@@ -480,8 +550,7 @@ class CardBuildWorkflowTest {
         public void placeInput(int inputIndex) {
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
             placedInputIds.put(inputIndex, pendingInputId);
-            beforeServerAction("place input " + (inputIndex + 1));
-            serverMenu.clicked(target, 0, ContainerInput.PICKUP, serverPlayer);
+            click("place input " + (inputIndex + 1), target, 0, ContainerInput.PICKUP);
         }
 
         @Override
@@ -491,7 +560,7 @@ class CardBuildWorkflowTest {
                 return false;
             }
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            boolean placed = snapshot.carried.isEmpty() && variableCardId(snapshot.slot(target)) == expectedId;
+            boolean placed = variableCardId(snapshot.slot(target)) == expectedId;
             if (!placed) {
                 trace("input " + (inputIndex + 1) + " pending: expected id=" + expectedId + ", slot="
                         + variableCardId(snapshot.slot(target)) + ", carried=" + describe(snapshot.carried));
@@ -508,8 +577,7 @@ class CardBuildWorkflowTest {
             if (inputSourceSlot < 0) {
                 throw new IllegalStateException("No source slot is available for the held input card.");
             }
-            beforeServerAction("return held input");
-            serverMenu.clicked(inputSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
+            click("return held input", inputSourceSlot, 0, ContainerInput.PICKUP);
             inputSourceSlot = -1;
             return true;
         }
@@ -525,8 +593,7 @@ class CardBuildWorkflowTest {
             if (blankSourceSlot < 0) {
                 throw new IllegalStateException("Blank Variable Cards are exhausted.");
             }
-            beforeServerAction("pick blank card");
-            serverMenu.clicked(blankSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
+            click("pick blank card", blankSourceSlot, 0, ContainerInput.PICKUP);
         }
 
         @Override
@@ -536,8 +603,7 @@ class CardBuildWorkflowTest {
 
         @Override
         public void placeBlank() {
-            beforeServerAction("place blank card");
-            serverMenu.clicked(LogicProgrammerMenuLayout.writeSlot(clientMenu), 1, ContainerInput.PICKUP, serverPlayer);
+            click("place blank card", LogicProgrammerMenuLayout.writeSlot(clientMenu), 1, ContainerInput.PICKUP);
         }
 
         @Override
@@ -549,8 +615,7 @@ class CardBuildWorkflowTest {
             if (blankSourceSlot < 0) {
                 throw new IllegalStateException("No source slot is available for the remaining blank cards.");
             }
-            beforeServerAction("return blank remainder");
-            serverMenu.clicked(blankSourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
+            click("return blank remainder", blankSourceSlot, 0, ContainerInput.PICKUP);
             blankSourceSlot = -1;
             return true;
         }
@@ -614,8 +679,7 @@ class CardBuildWorkflowTest {
             }
             int slot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
             if (!snapshot.slot(slot).isEmpty()) {
-                beforeServerAction("return input " + (inputIndex + 1));
-                serverMenu.clicked(slot, 0, ContainerInput.QUICK_MOVE, serverPlayer);
+                click("return input " + (inputIndex + 1), slot, 0, ContainerInput.QUICK_MOVE);
             }
         }
 
@@ -645,6 +709,21 @@ class CardBuildWorkflowTest {
             commandCount++;
             lastCommand = action;
             trace("command " + commandCount + ": " + action);
+        }
+
+        /**
+         * Mirrors {@code MultiPlayerGameMode.handleContainerInput}: apply the
+         * deterministic client-side click prediction first, then dispatch the
+         * identical click to the real Dynamic server menu. Local prediction
+         * intentionally does not increment {@link #synchronizationRevision};
+         * only the loopback synchronizer is an acknowledgement.
+         */
+        private void click(String action, int slot, int button, ContainerInput input) {
+            beforeServerAction(action);
+            clientMenu.clicked(slot, button, input, clientPlayer);
+            snapshot = ObservedMenuState.capture(clientMenu);
+            trace("client prediction: " + action + ", carried=" + describe(snapshot.carried));
+            serverMenu.clicked(slot, button, input, serverPlayer);
         }
 
         private void trace(String event) {
