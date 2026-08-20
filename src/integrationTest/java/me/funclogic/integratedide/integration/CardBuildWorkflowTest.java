@@ -54,12 +54,33 @@ class CardBuildWorkflowTest {
             "anyEquals(\"$minecraft:cobblestone\".withSize(10).size(), 10)";
 
     static void verify(MinecraftServer server) {
-        materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(server);
-        materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(server);
-        materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server);
-        reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(server);
-        remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(server);
-        stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(server);
+        List<AssertionError> failures = new ArrayList<>();
+        runCase(failures, "nested item-size expression",
+                () -> materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(server));
+        runCase(failures, "three-card anyConstant expression",
+                () -> materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(server));
+        runCase(failures, "separate one-card blank stacks",
+                () -> materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server));
+        runCase(failures, "virtual-variable reuse",
+                () -> reusesVirtualVariablesWithoutCreatingASecondSharedIntermediateCard(server));
+        runCase(failures, "withheld output synchronization",
+                () -> remainsWaitingUntilTheActualServerResultIsDeliveredAsANewSnapshot(server));
+        runCase(failures, "insufficient third blank card",
+                () -> stopsAfterTheRealProgrammerRejectsTheThirdBlankCard(server));
+        if (!failures.isEmpty()) {
+            AssertionError summary = new AssertionError("Logic Programmer workflow matrix failed in "
+                    + failures.size() + " case(s).");
+            failures.forEach(summary::addSuppressed);
+            throw summary;
+        }
+    }
+
+    private static void runCase(List<AssertionError> failures, String name, ServerCase test) {
+        try {
+            test.run();
+        } catch (RuntimeException | AssertionError error) {
+            failures.add(new AssertionError(name + ": " + error.getMessage(), error));
+        }
     }
 
     private static void materializesEveryCardForTheReportedExpressionThroughTheRealProgrammer(MinecraftServer server) {
@@ -163,7 +184,8 @@ class CardBuildWorkflowTest {
             run.driver.tick();
             run.port.flushServerChanges();
         }
-        assertFalse(run.driver.isRunning(), "The real Logic Programmer workflow did not reach a terminal state.");
+        assertFalse(run.driver.isRunning(), "The real Logic Programmer workflow did not reach a terminal state: "
+                + run.driver.status());
     }
 
     private static void advanceUntilFirstOutputReturnIsSent(BuildRun run) {
@@ -186,6 +208,11 @@ class CardBuildWorkflowTest {
 
     private record BuildRun(ExpressionCompiler.Compilation compilation, ServerDrivenProgrammer port,
                             CardBuildDriver driver) {
+    }
+
+    @FunctionalInterface
+    private interface ServerCase {
+        void run();
     }
 
     /**

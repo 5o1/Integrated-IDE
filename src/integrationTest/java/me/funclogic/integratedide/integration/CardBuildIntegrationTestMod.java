@@ -27,7 +27,11 @@ public final class CardBuildIntegrationTestMod {
             event.getServer().halt(false);
         } catch (RuntimeException | AssertionError error) {
             LOGGER.error("Integrated IDE real Logic Programmer integration test failed.", error);
-            throw error;
+            // NeoForge logs and continues after exceptions from lifecycle
+            // listeners. Terminate this test-only JVM explicitly so a failed
+            // server workflow can never produce a green Gradle build.
+            event.getServer().halt(false);
+            System.exit(1);
         }
     }
 }
