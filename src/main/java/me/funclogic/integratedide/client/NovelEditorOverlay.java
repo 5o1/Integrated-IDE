@@ -12,7 +12,6 @@ import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.FormattedCharSequence;
 import org.cyclops.integrateddynamics.client.gui.container.ContainerScreenLogicProgrammerBase;
 import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgrammerBase;
 import org.lwjgl.glfw.GLFW;
@@ -30,16 +29,8 @@ final class NovelEditorOverlay {
     private static final int WORK_WIDTH = 162;
     private static final int WORK_HEIGHT = 108;
     private static final int STATUS_HEIGHT = 32;
-    private static final int STATUS_PADDING = 3;
-    private static final int STATUS_SCROLLBAR_WIDTH = 3;
-    private static final int STATUS_SCROLLBAR_GAP = 2;
-    private static final float STATUS_SCALE = 0.75F;
     private static final int EDITOR_PADDING = 4;
-    private static final int MAX_COMPLETIONS = 5;
     private static final int MAX_SOURCE_CHARACTERS = 8_192;
-    private static final int EMPTY_GUIDE_LINES = 8;
-    private static final float GUIDE_SCALE = 0.75F;
-    private static final int GUIDE_LINE_HEIGHT = 7;
     // This is the original Logic Programmer's write-card slot. Keeping these
     // coordinates makes Novel mode visually continuous with vanilla mode.
     private static final int NATIVE_CARD_SLOT_X = 232;
@@ -54,6 +45,9 @@ final class NovelEditorOverlay {
     private final MultiLineEditBox editor;
     private final PanelWidget panel;
     private final ForegroundWidget foreground;
+    private final NovelDiagnosticPanel diagnostics;
+    private final NovelCompletionPopup popup;
+    private final NovelEditorAnnotations annotations;
     private final LogicProgrammerCatalog catalog;
     private final NovelSessionStore.Session session;
     private final boolean completionAvailable;
@@ -64,10 +58,8 @@ final class NovelEditorOverlay {
     private CardBuildDriver driver;
     private NovelCompilationCache.Reconciliation activeReconciliation;
     private List<NovelCompilationCache.MissingNode> missingCachedNodes = List.of();
-    private NovelDiagnostic diagnostic = NovelDiagnostic.info("\u6309 Ctrl+Enter \u68c0\u67e5\u5e76\u751f\u6210");
-    private int statusScrollLine;
     private int selectedCompletion;
-    private PopupMode popupMode = PopupMode.NONE;
+    private NovelCompletionPopup.Mode popupMode = NovelCompletionPopup.Mode.NONE;
     private boolean novelMode;
     private boolean editorFocused;
     private boolean editorDragging;
@@ -88,6 +80,7 @@ final class NovelEditorOverlay {
         this.workY = guiTop + WORK_Y;
         this.panel = new PanelWidget();
         this.foreground = new ForegroundWidget();
+        this.diagnostics = new NovelDiagnosticPanel(font, workX, workY, WORK_HEIGHT, nativeCardSlotX());
         this.modeTab = new ModeTabWidget(guiLeft + 199, Math.max(0, guiTop - 15));
         this.editor = MultiLineEditBox.builder()
                 .setX(workX + EDITOR_PADDING)
@@ -97,6 +90,10 @@ final class NovelEditorOverlay {
                 .build(font, WORK_WIDTH - EDITOR_PADDING * 2, WORK_HEIGHT - STATUS_HEIGHT - EDITOR_PADDING * 2,
                         Component.translatable("integratedide.title"));
         this.editor.setLineLimit(128);
+        this.popup = new NovelCompletionPopup(font, editor, workY + 1,
+                workY + WORK_HEIGHT - STATUS_HEIGHT - 2, EDITOR_PADDING, 5);
+        this.annotations = new NovelEditorAnnotations(font, editor, EDITOR_PADDING, MAX_SOURCE_CHARACTERS,
+                nativeCardSlotX(), nativeCardSlotY(), CARD_SLOT_SIZE);
         this.catalog = LogicProgrammerCatalog.create();
         this.session = NovelSessionStore.current();
         this.editor.setValueListener(this::editorValueChanged);
@@ -145,7 +142,7 @@ final class NovelEditorOverlay {
             yieldEditorFocus();
             this.completions = List.of();
             this.signature = null;
-            this.popupMode = PopupMode.NONE;
+            this.popupMode = NovelCompletionPopup.Mode.NONE;
         }
     }
 
@@ -182,15 +179,18 @@ final class NovelEditorOverlay {
             refreshCompletions();
             return true;
         }
-        if (event.key() == GLFW.GLFW_KEY_TAB && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_TAB && popupMode == NovelCompletionPopup.Mode.COMPLETIONS
+                && !completions.isEmpty()) {
             applyCompletion(selectedCompletion);
             return true;
         }
-        if (event.key() == GLFW.GLFW_KEY_DOWN && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_DOWN && popupMode == NovelCompletionPopup.Mode.COMPLETIONS
+                && !completions.isEmpty()) {
             selectedCompletion = (selectedCompletion + 1) % completions.size();
             return true;
         }
-        if (event.key() == GLFW.GLFW_KEY_UP && popupMode == PopupMode.COMPLETIONS && !completions.isEmpty()) {
+        if (event.key() == GLFW.GLFW_KEY_UP && popupMode == NovelCompletionPopup.Mode.COMPLETIONS
+                && !completions.isEmpty()) {
             selectedCompletion = (selectedCompletion + completions.size() - 1) % completions.size();
             return true;
         }
@@ -221,7 +221,7 @@ final class NovelEditorOverlay {
         if (!novelMode) {
             return false;
         }
-        int completionIndex = completionAt(event.x(), event.y());
+        int completionIndex = popup.completionAt(popupMode, completions, signature, event.x(), event.y());
         if (completionIndex >= 0) {
             applyCompletion(completionIndex);
             return true;
@@ -230,11 +230,8 @@ final class NovelEditorOverlay {
             setInfo("\u961f\u5217\u4f7f\u7528\u80cc\u5305\u4e2d\u7684\u7a7a\u767d Variable Card\u3002");
             return true;
         }
-        if (insideStatusArea(event.x(), event.y())) {
-            statusDragging = insideStatusScrollBar(event.x(), event.y());
-            if (statusDragging) {
-                updateStatusScroll(event.y());
-            }
+        if (diagnostics.contains(event.x(), event.y())) {
+            statusDragging = diagnostics.beginScrollDrag(event.x(), event.y());
             return true;
         }
         if (insideEditor(event.x(), event.y())) {
@@ -255,7 +252,7 @@ final class NovelEditorOverlay {
             return false;
         }
         if (statusDragging) {
-            updateStatusScroll(event.y());
+            diagnostics.dragTo(event.y());
             return true;
         }
         if (!editorDragging) {
@@ -285,8 +282,8 @@ final class NovelEditorOverlay {
         if (!novelMode) {
             return false;
         }
-        if (insideStatusArea(mouseX, mouseY)) {
-            statusScrollLine = clamp(statusScrollLine - (int) Math.signum(scrollY), 0, maxStatusScroll());
+        if (diagnostics.contains(mouseX, mouseY)) {
+            diagnostics.scroll(scrollY);
             return true;
         }
         if (!insideEditor(mouseX, mouseY)) {
@@ -459,12 +456,11 @@ final class NovelEditorOverlay {
     }
 
     /**
-     * Every replacement starts at the first diagnostic line. Without this,
-     * an old scrollbar position can hide a new compiler error entirely.
+     * The panel owns its scroll state and resets it for each replacement, so
+     * a new compiler error is never hidden by an old scroll position.
      */
     private void setDiagnostic(NovelDiagnostic next) {
-        diagnostic = next;
-        statusScrollLine = 0;
+        diagnostics.setDiagnostic(next);
     }
 
     private boolean buildRunning() {
@@ -475,7 +471,7 @@ final class NovelEditorOverlay {
         if (!novelMode || !completionAvailable) {
             completions = List.of();
             signature = null;
-            popupMode = PopupMode.NONE;
+            popupMode = NovelCompletionPopup.Mode.NONE;
             return;
         }
         String source = editor.getValue();
@@ -486,11 +482,12 @@ final class NovelEditorOverlay {
             ExpressionCompiler.TypeInfo expectedType = signature == null ? null : signature.expectedType();
             completions = catalog.completions(source, cursor, expectedType, completionExplicitlyRequested);
             selectedCompletion = Math.min(selectedCompletion, Math.max(0, completions.size() - 1));
-            popupMode = PopupMode.COMPLETIONS;
+            popupMode = NovelCompletionPopup.Mode.COMPLETIONS;
             return;
         }
         completions = List.of();
-        popupMode = signature != null && signature.emptyArgument() ? PopupMode.SIGNATURE : PopupMode.NONE;
+        popupMode = signature != null && signature.emptyArgument() ? NovelCompletionPopup.Mode.SIGNATURE
+                : NovelCompletionPopup.Mode.NONE;
     }
 
     private void applyCompletion(int index) {
@@ -499,7 +496,7 @@ final class NovelEditorOverlay {
         }
         if (!CompletionEditorAccess.replaceCurrentToken(editor, completions.get(index).insertion())) {
             completions = List.of();
-            popupMode = PopupMode.NONE;
+            popupMode = NovelCompletionPopup.Mode.NONE;
             setError("\u5f53\u524d Minecraft \u7248\u672c\u65e0\u6cd5\u8bfb\u53d6\u5149\u6807\u4f4d\u7f6e\uff0c\u8865\u5168\u5df2\u5173\u95ed\u3002");
             return;
         }
@@ -508,232 +505,10 @@ final class NovelEditorOverlay {
 
     private void renderForeground(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         tick();
-        renderStatus(graphics);
-        renderCardCapacity(graphics);
-        renderEmptyEditorGuide(graphics);
-        renderExternalReferences(graphics);
-        renderMissingCachedNodeMarkers(graphics);
-        renderErrorUnderline(graphics);
-        renderHoveredRootId(graphics, mouseX, mouseY);
-        renderPopup(graphics);
-    }
-
-    private void renderStatus(GuiGraphicsExtractor graphics) {
-        List<FormattedCharSequence> lines = statusLines();
-        int visibleLines = visibleStatusLines();
-        statusScrollLine = clamp(statusScrollLine, 0, Math.max(0, lines.size() - visibleLines));
-        int lineHeight = statusLineHeight();
-        graphics.pose().pushMatrix();
-        graphics.pose().scale(STATUS_SCALE, STATUS_SCALE);
-        for (int index = 0; index < visibleLines && statusScrollLine + index < lines.size(); index++) {
-            int x = Math.round(statusLeft() / STATUS_SCALE);
-            int y = Math.round((statusTop() + index * lineHeight) / STATUS_SCALE);
-            graphics.text(font, lines.get(statusScrollLine + index), x, y, statusColor(), false);
-        }
-        graphics.pose().popMatrix();
-        renderStatusScrollBar(graphics, lines.size(), visibleLines);
-    }
-
-    private void renderStatusScrollBar(GuiGraphicsExtractor graphics, int lineCount, int visibleLines) {
-        if (lineCount <= visibleLines) {
-            return;
-        }
-        int x = statusScrollBarX();
-        int top = statusTop();
-        int height = statusBottom() - top;
-        int thumbHeight = statusThumbHeight(lineCount, visibleLines);
-        int range = Math.max(1, height - thumbHeight);
-        int maxScroll = Math.max(1, lineCount - visibleLines);
-        int thumbY = top + Math.round(range * statusScrollLine / (float) maxScroll);
-        graphics.fill(x, top, x + STATUS_SCROLLBAR_WIDTH, statusBottom(), 0xFF333333);
-        graphics.fill(x, thumbY, x + STATUS_SCROLLBAR_WIDTH, thumbY + thumbHeight, 0xFF9A9A9A);
-    }
-
-    private List<FormattedCharSequence> statusLines() {
-        return font.split(Component.literal(diagnostic.text()), statusTextWidth());
-    }
-
-    private int maxStatusScroll() {
-        return Math.max(0, statusLines().size() - visibleStatusLines());
-    }
-
-    private int visibleStatusLines() {
-        return Math.max(1, (statusBottom() - statusTop()) / statusLineHeight());
-    }
-
-    private int statusLineHeight() {
-        return Math.max(1, Math.round(font.lineHeight * STATUS_SCALE));
-    }
-
-    private int statusThumbHeight(int lineCount, int visibleLines) {
-        int trackHeight = statusBottom() - statusTop();
-        return Math.max(4, Math.round(trackHeight * visibleLines / (float) Math.max(1, lineCount)));
-    }
-
-    private int statusLeft() {
-        return workX + STATUS_PADDING;
-    }
-
-    private int statusRight() {
-        return nativeCardSlotX() - STATUS_PADDING;
-    }
-
-    private int statusTop() {
-        return workY + WORK_HEIGHT - STATUS_HEIGHT + STATUS_PADDING;
-    }
-
-    private int statusBottom() {
-        return workY + WORK_HEIGHT - STATUS_PADDING;
-    }
-
-    private int statusTextWidth() {
-        return Math.max(1, Math.round((statusScrollBarX() - STATUS_SCROLLBAR_GAP - statusLeft()) / STATUS_SCALE));
-    }
-
-    private int statusScrollBarX() {
-        return statusRight() - STATUS_SCROLLBAR_WIDTH;
-    }
-
-    private boolean insideStatusArea(double mouseX, double mouseY) {
-        return mouseX >= statusLeft() && mouseX < statusRight()
-                && mouseY >= statusTop() && mouseY < statusBottom();
-    }
-
-    private boolean insideStatusScrollBar(double mouseX, double mouseY) {
-        return mouseX >= statusScrollBarX() && mouseX < statusRight()
-                && mouseY >= statusTop() && mouseY < statusBottom();
-    }
-
-    private void updateStatusScroll(double mouseY) {
-        int maxScroll = maxStatusScroll();
-        if (maxScroll == 0) {
-            statusScrollLine = 0;
-            return;
-        }
-        int lineCount = statusLines().size();
-        int thumbHeight = statusThumbHeight(lineCount, visibleStatusLines());
-        int range = Math.max(1, statusBottom() - statusTop() - thumbHeight);
-        double top = mouseY - statusTop() - thumbHeight / 2D;
-        statusScrollLine = clamp((int) Math.round(top * maxScroll / range), 0, maxScroll);
-    }
-
-    private void renderEmptyEditorGuide(GuiGraphicsExtractor graphics) {
-        if (!editor.getValue().isEmpty()) {
-            return;
-        }
-        int x = editor.getX() + EDITOR_PADDING;
-        int y = editor.getY() + EDITOR_PADDING;
-        int maxWidth = Math.round((editor.getWidth() - EDITOR_PADDING * 2) / GUIDE_SCALE);
-        int visualLine = 0;
-        graphics.pose().pushMatrix();
-        graphics.pose().scale(GUIDE_SCALE, GUIDE_SCALE);
-        for (int line = 1; line <= EMPTY_GUIDE_LINES; line++) {
-            Component shortcut = line == 1 ? IntegratedIdeKeyMappings.COMPILE_NOVEL.getTranslatedKeyMessage()
-                    : line == 2 ? IntegratedIdeKeyMappings.REQUEST_COMPLETION.getTranslatedKeyMessage() : Component.empty();
-            List<FormattedCharSequence> wrapped = font.split(
-                    Component.translatable("integratedide.guide." + line, shortcut), maxWidth);
-            for (FormattedCharSequence visualLineText : wrapped) {
-                graphics.text(font, visualLineText, Math.round(x / GUIDE_SCALE),
-                        Math.round((y + visualLine * GUIDE_LINE_HEIGHT) / GUIDE_SCALE), 0xFF8A8A8A, false);
-                visualLine++;
-            }
-        }
-        graphics.pose().popMatrix();
-    }
-
-    private void renderHoveredRootId(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-        if (!insideEditor(mouseX, mouseY) || compilation == null || !compilation.valid()) {
-            return;
-        }
-        String source = editor.getValue();
-        int relativeY = mouseY - editor.getY() - EDITOR_PADDING + (int) editor.scrollAmount();
-        if (relativeY < 0) {
-            return;
-        }
-        int line = relativeY / font.lineHeight;
-        int lineStart = sourceLineStart(source, line);
-        if (lineStart < 0) {
-            return;
-        }
-        int newline = source.indexOf('\n', lineStart);
-        int lineEnd = newline < 0 ? source.length() : newline;
-        ExpressionCompiler.StatementRoot root = compilation.statementRoots().stream()
-                .filter(candidate -> candidate.sourceStart() >= lineStart && candidate.sourceStart() < lineEnd)
-                .findFirst()
-                .orElse(null);
-        if (root == null) {
-            return;
-        }
-        ExpressionCompiler.CardStep rootStep = compilation.steps().stream()
-                .filter(candidate -> candidate.id().equals(root.stepId()))
-                .findFirst()
-                .orElse(null);
-        if (rootStep == null) {
-            return;
-        }
-
-        int id;
-        int color;
-        if (rootStep.kind() == ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
-            id = Integer.parseInt(rootStep.value());
-            boolean available = CardInventory.findVariableCardById(Minecraft.getInstance().player, id,
-                    rootStep.outputTypeId()) != null;
-            color = available ? 0xFF55AAFF : 0xFFFF5555;
-        } else {
-            NovelCompilationCache.CachedNode cached = previewReconciliation == null ? null
-                    : previewReconciliation.match(root.stepId());
-            if (cached == null || cached.variableCardId < 0) {
-                return;
-            }
-            id = cached.variableCardId;
-            color = 0xFFE0E0E0;
-        }
-
-        TextLocation location = textLocation(lineStart);
-        if (location.y() < editor.getY() || location.y() >= editor.getBottom()) {
-            return;
-        }
-        String label = "{" + id + "}";
-        int x = editor.getX() + 1;
-        int width = font.width(label);
-        graphics.fill(x - 1, location.y() - 1, x + width + 2, location.y() + font.lineHeight + 1, 0xD0101010);
-        graphics.text(font, label, x, location.y(), color, false);
-    }
-
-    private static int sourceLineStart(String source, int line) {
-        int start = 0;
-        for (int current = 0; current < line; current++) {
-            int newline = source.indexOf('\n', start);
-            if (newline < 0) {
-                return -1;
-            }
-            start = newline + 1;
-        }
-        return start;
-    }
-
-    private void renderCardCapacity(GuiGraphicsExtractor graphics) {
-        var player = Minecraft.getInstance().player;
-        int required = requiredBlankCards(player);
-        int available = CardBuildDriver.countBlankVariableCards(player);
-        int freeSlots = CardInventory.countEmptyPlayerSlots(player);
-        String capacity = required + "/" + available + "/" + freeSlots;
-        int left = nativeCardSlotX() + 1;
-        int right = nativeCardSlotX() + CARD_SLOT_SIZE - 1;
-        int top = nativeCardSlotY() + 1;
-        int bottom = nativeCardSlotY() + CARD_SLOT_SIZE - 1;
-        float scale = Math.min((right - left - 2F) / font.width(capacity),
-                (bottom - top - 2F) / font.lineHeight);
-        int width = Math.round(font.width(capacity) * scale);
-        int height = Math.round(font.lineHeight * scale);
-        int x = right - width - 1;
-        int y = bottom - height - 1;
-        int color = available >= required && freeSlots >= required ? 0xFF9CCF9C : 0xFFE08080;
-        graphics.fill(Math.max(left, x - 1), Math.max(top, y - 1), right, bottom, 0xD0101010);
-        graphics.pose().pushMatrix();
-        graphics.pose().scale(scale, scale);
-        graphics.text(font, capacity, Math.round(x / scale), Math.round(y / scale), color, false);
-        graphics.pose().popMatrix();
+        diagnostics.render(graphics);
+        annotations.render(graphics, compilation, previewReconciliation, missingCachedNodes,
+                requiredBlankCards(Minecraft.getInstance().player), mouseX, mouseY);
+        popup.render(graphics, popupMode, completions, signature, selectedCompletion);
     }
 
     private int requiredBlankCards(net.minecraft.world.entity.player.Player player) {
@@ -746,281 +521,6 @@ final class NovelEditorOverlay {
             return selection.stepsToBuild().size();
         }
         return (int) compilation.steps().stream().filter(ExpressionCompiler.CardStep::createsVariableCard).count();
-    }
-
-    private void renderEditorCharacterCount(GuiGraphicsExtractor graphics) {
-        String counter = editor.getValue().length() + "/" + MAX_SOURCE_CHARACTERS;
-        int x = editor.getRight() - font.width(counter) - 4;
-        int y = editor.getBottom() - font.lineHeight - 3;
-        graphics.text(font, counter, x, y, 0xFFA0A0A0, false);
-    }
-
-    private void renderExternalReferences(GuiGraphicsExtractor graphics) {
-        if (compilation == null || !compilation.valid()) {
-            return;
-        }
-        var player = Minecraft.getInstance().player;
-        for (ExpressionCompiler.CardStep step : compilation.steps()) {
-            if (step.kind() != ExpressionCompiler.StepKind.EXTERNAL_REFERENCE) {
-                continue;
-            }
-            int id = Integer.parseInt(step.value());
-            boolean available = CardInventory.findVariableCardById(player, id, step.outputTypeId()) != null;
-            renderTextRange(graphics, step.sourceStart(), explicitReferenceEnd(step),
-                    available ? 0xFF55AAFF : 0xFFFF5555);
-        }
-    }
-
-    private int explicitReferenceEnd(ExpressionCompiler.CardStep step) {
-        String source = editor.getValue();
-        int closingBrace = source.indexOf('}', Math.max(0, step.sourceStart()));
-        return closingBrace < 0 ? step.sourceEnd() : closingBrace + 1;
-    }
-
-    private void renderMissingCachedNodeMarkers(GuiGraphicsExtractor graphics) {
-        for (NovelCompilationCache.MissingNode missing : missingCachedNodes) {
-            renderRangeUnderline(graphics, missing.step().sourceStart(), missing.step().sourceEnd(), 0xFFE06060);
-        }
-    }
-
-    private void renderTextRange(GuiGraphicsExtractor graphics, int start, int end, int color) {
-        TextLocation location = textLocation(start);
-        String source = editor.getValue();
-        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
-        int lineEnd = source.indexOf('\n', location.position());
-        if (lineEnd < 0) {
-            lineEnd = source.length();
-        }
-        if (location.y() >= editor.getY() && location.y() < editor.getBottom()
-                && lineEnd >= safeEnd) {
-            graphics.text(font, source.substring(location.position(), safeEnd), location.x(), location.y(), color, false);
-        }
-    }
-
-    private void renderRangeUnderline(GuiGraphicsExtractor graphics, int start, int end, int color) {
-        TextLocation location = textLocation(start);
-        String source = editor.getValue();
-        int safeEnd = Math.max(location.position(), Math.min(end, source.length()));
-        int lineEnd = source.indexOf('\n', location.position());
-        if (lineEnd < 0) {
-            lineEnd = source.length();
-        }
-        if (location.y() >= editor.getY() && location.y() < editor.getBottom()) {
-            int width = font.width(source.substring(location.position(), Math.min(safeEnd, lineEnd)));
-            graphics.fill(location.x(), location.y() + font.lineHeight - 1, location.x() + Math.max(3, width),
-                    location.y() + font.lineHeight, color);
-        }
-    }
-
-    private TextLocation textLocation(int position) {
-        String source = editor.getValue();
-        int safePosition = Math.max(0, Math.min(position, source.length()));
-        int lineStart = source.lastIndexOf('\n', safePosition - 1) + 1;
-        int line = 0;
-        for (int index = 0; index < lineStart; index++) {
-            if (source.charAt(index) == '\n') {
-                line++;
-            }
-        }
-        int x = editor.getX() + EDITOR_PADDING + font.width(source.substring(lineStart, safePosition));
-        int y = editor.getY() + EDITOR_PADDING + line * font.lineHeight - (int) editor.scrollAmount();
-        return new TextLocation(safePosition, x, y);
-    }
-
-    private void renderErrorUnderline(GuiGraphicsExtractor graphics) {
-        if (compilation == null || compilation.valid() || compilation.errorPosition() < 0) {
-            return;
-        }
-        String source = editor.getValue();
-        int position = Math.min(compilation.errorPosition(), source.length());
-        int lineStart = source.lastIndexOf('\n', position - 1) + 1;
-        int line = 0;
-        for (int index = 0; index < lineStart; index++) {
-            if (source.charAt(index) == '\n') {
-                line++;
-            }
-        }
-        int x = editor.getX() + EDITOR_PADDING + font.width(source.substring(lineStart, position));
-        int y = editor.getY() + EDITOR_PADDING + line * font.lineHeight - (int) editor.scrollAmount();
-        if (y >= editor.getY() && y < editor.getBottom()) {
-            graphics.fill(x, y + font.lineHeight - 1, x + 3, y + font.lineHeight, 0xFFE06060);
-        }
-    }
-
-    private void renderPopup(GuiGraphicsExtractor graphics) {
-        Popup popup = popup();
-        if (popup == null) {
-            return;
-        }
-        graphics.fill(popup.x(), popup.y(), popup.x() + popup.width(), popup.y() + popup.height(), 0xF0181818);
-        graphics.outline(popup.x(), popup.y(), popup.width(), popup.height(), 0xFF777777);
-        int rowY = popup.y() + 3;
-        for (PopupRow row : popup.rows()) {
-            boolean selected = popupMode == PopupMode.COMPLETIONS && row.completionIndex() == selectedCompletion;
-            if (selected) {
-                graphics.fill(popup.x() + 1, rowY - 1, popup.x() + popup.width() - 1, rowY + row.height() - 1,
-                        0xFF4A4A4A);
-            }
-            int lineY = rowY;
-            for (PopupLine line : row.lines()) {
-                int availableWidth = popup.width() - 8 - line.indent();
-                String visible = font.plainSubstrByWidth(line.text(), Math.max(1, availableWidth));
-                int color = selected || line.active() ? 0xFFFFD080 : 0xFFE0E0E0;
-                graphics.text(font, visible, popup.x() + 4 + line.indent(), lineY, color, false);
-                lineY += completionLineHeight();
-            }
-            rowY += row.height();
-        }
-    }
-
-    private Popup popup() {
-        if (popupMode == PopupMode.NONE || popupMode == PopupMode.COMPLETIONS && completions.isEmpty()) {
-            return null;
-        }
-        int width = editor.getWidth();
-        int minY = workY + 1;
-        int maxY = workY + WORK_HEIGHT - STATUS_HEIGHT - 2;
-        CompletionEditorAccess.Caret caret = CompletionEditorAccess.caret(editor);
-        String source = editor.getValue();
-        int beforeCursor = Math.max(caret.lineStart(), Math.min(caret.cursor(), source.length()));
-        int anchorY = editor.getY() + EDITOR_PADDING + caret.visualLine() * font.lineHeight
-                - (int) editor.scrollAmount();
-        int maximumRows = popupMode == PopupMode.COMPLETIONS ? Math.min(MAX_COMPLETIONS, completions.size()) : 1;
-        for (int count = maximumRows; count > 0; count--) {
-            List<PopupRow> rows = popupRows(count);
-            int height = 4;
-            for (PopupRow row : rows) {
-                height += row.height();
-            }
-            if (height > maxY - minY) {
-                continue;
-            }
-            int below = anchorY + font.lineHeight + 2;
-            int above = anchorY - height - 2;
-            int y;
-            if (below + height <= maxY) {
-                y = below;
-            } else if (above >= minY) {
-                y = above;
-            } else {
-                // It may overlap the editor, but never the mode tab, status,
-                // native card slot, or player inventory.
-                y = clamp(below, minY, maxY - height);
-            }
-            return new Popup(editor.getX(), y, width, height, rows);
-        }
-        return null;
-    }
-
-    private int completionAt(double mouseX, double mouseY) {
-        Popup popup = popup();
-        if (popup == null || mouseX < popup.x() || mouseX >= popup.x() + popup.width()
-                || mouseY < popup.y() || mouseY >= popup.y() + popup.height()) {
-            return -1;
-        }
-        int rowY = popup.y() + 3;
-        for (PopupRow row : popup.rows()) {
-            if (mouseY >= rowY && mouseY < rowY + row.height()) {
-                return row.completionIndex();
-            }
-            rowY += row.height();
-        }
-        return -1;
-    }
-
-    private List<PopupRow> popupRows(int count) {
-        if (popupMode == PopupMode.SIGNATURE && signature != null) {
-            List<PopupLine> lines = signatureLines(signature);
-            return List.of(new PopupRow(-1, lines, lines.size() * completionLineHeight() + 2));
-        }
-        List<PopupRow> rows = new java.util.ArrayList<>();
-        for (int index = 0; index < count; index++) {
-            List<PopupLine> lines = index == 0 ? expandedCompletionLines(completions.get(index))
-                    : List.of(new PopupLine(0, collapsedCompletionText(completions.get(index)), false));
-            rows.add(new PopupRow(index, lines, lines.size() * completionLineHeight() + 2));
-        }
-        return rows;
-    }
-
-    private List<PopupLine> expandedCompletionLines(LogicProgrammerCatalog.Completion completion) {
-        if (completion.function() == null) {
-            return List.of(new PopupLine(0, completion.insertion() + "  " + completion.detail(), false));
-        }
-        String opening = completion.insertion();
-        List<ExpressionCompiler.TypeInfo> inputs = completion.function().inputTypes();
-        int firstArgument = Math.min(completion.receiverArguments(), inputs.size());
-        if (firstArgument == inputs.size()) {
-            return List.of(new PopupLine(0, opening + ")", false));
-        }
-        StringBuilder singleLine = new StringBuilder(opening);
-        for (int index = firstArgument; index < inputs.size(); index++) {
-            if (index > firstArgument) {
-                singleLine.append(", ");
-            }
-            singleLine.append(inputs.get(index).displayName());
-        }
-        singleLine.append(')');
-        if (font.width(singleLine.toString()) <= editor.getWidth() - 8) {
-            return List.of(new PopupLine(0, singleLine.toString(), false));
-        }
-        List<PopupLine> lines = new java.util.ArrayList<>();
-        int indent = font.width(opening);
-        for (int index = firstArgument; index < inputs.size(); index++) {
-            boolean last = index == inputs.size() - 1;
-            String argument = inputs.get(index).displayName() + (last ? ")" : ",");
-            lines.add(new PopupLine(index == firstArgument ? 0 : indent,
-                    index == firstArgument ? opening + argument : argument, false));
-        }
-        return lines;
-    }
-
-    private List<PopupLine> signatureLines(LogicProgrammerCatalog.Signature current) {
-        List<ExpressionCompiler.TypeInfo> inputs = current.function().inputTypes();
-        int firstArgument = Math.min(current.receiverArguments(), inputs.size());
-        String opening = current.invocation() + "(";
-        if (firstArgument == inputs.size()) {
-            return List.of(new PopupLine(0, opening + ")", true));
-        }
-        StringBuilder singleLine = new StringBuilder(opening);
-        for (int index = firstArgument; index < inputs.size(); index++) {
-            if (index > firstArgument) {
-                singleLine.append(", ");
-            }
-            singleLine.append(inputs.get(index).displayName());
-        }
-        singleLine.append(')');
-        if (font.width(singleLine.toString()) <= editor.getWidth() - 8) {
-            return List.of(new PopupLine(0, singleLine.toString(), true));
-        }
-        List<PopupLine> lines = new java.util.ArrayList<>();
-        int indent = font.width(opening);
-        int activeInput = firstArgument + current.activeArgument();
-        for (int index = firstArgument; index < inputs.size(); index++) {
-            boolean last = index == inputs.size() - 1;
-            String argument = inputs.get(index).displayName() + (last ? ")" : ",");
-            lines.add(new PopupLine(index == firstArgument ? 0 : indent,
-                    index == firstArgument ? opening + argument : argument, index == activeInput));
-        }
-        return lines;
-    }
-
-    private String collapsedCompletionText(LogicProgrammerCatalog.Completion completion) {
-        if (completion.function() == null) {
-            return completion.insertion() + "  " + completion.detail();
-        }
-        String insertion = completion.insertion();
-        return insertion.endsWith("(") ? insertion.substring(0, insertion.length() - 1) + "(...)" : insertion;
-    }
-
-    private int completionLineHeight() {
-        return font.lineHeight + 1;
-    }
-
-    private int statusColor() {
-        if (diagnostic.severity() == NovelDiagnostic.Severity.ERROR) {
-            return 0xFFE08080;
-        }
-        return 0xFF9CCF9C;
     }
 
     private boolean insideEditor(double mouseX, double mouseY) {
@@ -1047,10 +547,6 @@ final class NovelEditorOverlay {
         return mouseX >= workX && mouseX < workX + WORK_WIDTH && mouseY >= workY && mouseY < workY + WORK_HEIGHT;
     }
 
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
     private void renderPanel(GuiGraphicsExtractor graphics) {
         int slotX = nativeCardSlotX();
         int slotY = nativeCardSlotY();
@@ -1063,39 +559,12 @@ final class NovelEditorOverlay {
         graphics.fill(slotX + CARD_SLOT_SIZE, slotY, panelRight, panelBottom, 0xFF161616);
         graphics.fill(slotX, slotY + CARD_SLOT_SIZE, panelRight, panelBottom, 0xFF161616);
         graphics.outline(workX, workY, WORK_WIDTH, WORK_HEIGHT, 0xFF777777);
-        graphics.fill(statusLeft() - 2, statusTop() - 2, statusRight() + 2, statusBottom() + 2, 0xD0101010);
-        graphics.outline(statusLeft() - 2, statusTop() - 2, statusRight() - statusLeft() + 4,
-                statusBottom() - statusTop() + 4, 0xFF4A4A4A);
-        renderEditorCharacterCountBackground(graphics);
+        diagnostics.renderBackground(graphics);
+        annotations.renderCounterBackground(graphics);
         // Draw the label before the editor's widget render. Its dark backing
         // and text are deliberately behind user input, so typing in the lower
         // right corner remains completely readable.
-        renderEditorCharacterCount(graphics);
-    }
-
-    private void renderEditorCharacterCountBackground(GuiGraphicsExtractor graphics) {
-        String counter = editor.getValue().length() + "/" + MAX_SOURCE_CHARACTERS;
-        int right = editor.getRight() - 2;
-        int bottom = editor.getBottom() - 2;
-        int x = right - font.width(counter) - 4;
-        int y = bottom - font.lineHeight - 2;
-        graphics.fill(x - 2, y - 1, right, bottom, 0xD0101010);
-    }
-
-    private record Popup(int x, int y, int width, int height, List<PopupRow> rows) {
-    }
-
-    private record TextLocation(int position, int x, int y) {
-    }
-
-    private record PopupRow(int completionIndex, List<PopupLine> lines, int height) {
-    }
-
-    private enum PopupMode {
-        NONE, SIGNATURE, COMPLETIONS
-    }
-
-    private record PopupLine(int indent, String text, boolean active) {
+        annotations.renderCounter(graphics);
     }
 
     private final class PanelWidget extends AbstractWidget {
