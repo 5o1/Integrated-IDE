@@ -24,7 +24,10 @@ public final class CardBuildIntegrationTestMod {
         try {
             CardBuildWorkflowTest.verify(event.getServer());
             LOGGER.info("Integrated IDE real Logic Programmer integration tests passed.");
-            event.getServer().halt(false);
+            // This handler runs on the server thread. Calling halt here makes
+            // that thread wait for itself; direct process exit is the only
+            // deterministic terminal signal for this isolated CI JVM.
+            System.exit(0);
         } catch (RuntimeException | AssertionError error) {
             LOGGER.error("Integrated IDE real Logic Programmer integration test failed.", error);
             // NeoForge logs and continues after exceptions from lifecycle
