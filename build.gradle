@@ -90,7 +90,7 @@ neoForge {
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
-        // Loaded only from src/test. It starts a real NeoForge server, runs
+        // Loaded only from src/integrationTest. It starts a real NeoForge server, runs
         // the actual Logic Programmer transaction harness on ServerStarted,
         // and stops it after the assertions. It is never part of the release
         // client JAR.

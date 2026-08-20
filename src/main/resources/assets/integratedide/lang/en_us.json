@@ -35,7 +35,6 @@
   "integratedide.build.wait.output_ready": "Waiting for the server to write the Variable Card output…",
   "integratedide.build.wait.remainder": "Waiting for the server to return blank Variable Card remainder…",
   "integratedide.build.wait.output_stored": "Waiting for the server to synchronize the new Variable Card to inventory…",
-  "integratedide.build.wait.input_returned": "Waiting for the server to return the input Variable Card…",
   "integratedide.build.progress": "Built %s/%s Variable Card(s)…",
   "integratedide.build.stopped": "Stopped: %s",
   "integratedide.error.completion_unavailable": "Code completion is unavailable because this Minecraft version exposes no accessible editor cursor API.",

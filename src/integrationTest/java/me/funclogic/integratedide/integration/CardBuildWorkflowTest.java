@@ -61,6 +61,23 @@ class CardBuildWorkflowTest {
                 () -> materializesAllThreeCardsForAnyConstantUsingActualPacketsAndInventoryClicks(server));
         runCase(failures, "reference input cursor protocol",
                 () -> predictsTheReferenceInputClickThenWaitsForItsExplicitServerReturn(server));
+        runCase(failures, "string literal card transport",
+                () -> materializesLiteralThroughTheRealProgrammer(server, "anyEquals(\"plain\", \"plain\")",
+                        ExpressionCompiler.StepKind.STATIC_TEXT));
+        runCase(failures, "boolean literal card transport",
+                () -> materializesLiteralThroughTheRealProgrammer(server, "anyEquals(true, true)",
+                        ExpressionCompiler.StepKind.STATIC_BOOLEAN));
+        runCase(failures, "mod literal card transport",
+                () -> materializesLiteralThroughTheRealProgrammer(server, "anyEquals(\"@minecraft\", \"@minecraft\")",
+                        ExpressionCompiler.StepKind.STATIC_MOD));
+        runCase(failures, "fluid literal card transport",
+                () -> materializesLiteralThroughTheRealProgrammer(server,
+                        "anyEquals(\"$minecraft:water\", \"$minecraft:water\")",
+                        ExpressionCompiler.StepKind.STATIC_FLUID));
+        runCase(failures, "tag literal card transport",
+                () -> materializesLiteralThroughTheRealProgrammer(server,
+                        "anyEquals(\"#minecraft:planks\", \"#minecraft:planks\")",
+                        ExpressionCompiler.StepKind.STATIC_TAG));
         runCase(failures, "separate one-card blank stacks",
                 () -> materializesSeparateOneCardStacksWithoutWaitingForANonexistentRemainderSync(server));
         runCase(failures, "virtual-variable reuse",
@@ -113,6 +130,21 @@ class CardBuildWorkflowTest {
         assertEquals(3, run.port.validCardsInPlayerInventory());
     }
 
+    /** Runs every literal transport through Dynamic's packet handler and write slot, not a dispatcher mock. */
+    private static void materializesLiteralThroughTheRealProgrammer(MinecraftServer server, String source,
+                                                                     ExpressionCompiler.StepKind literalKind) {
+        BuildRun run = start(server, source, 3);
+
+        assertTrue(run.compilation.steps().stream().anyMatch(step -> step.kind() == literalKind),
+                "The real catalog did not lower " + literalKind + " for " + source);
+        drainAfterEveryServerSnapshot(run);
+
+        assertTrue(run.driver.isComplete(), run.driver.status());
+        assertEquals(3, run.port.confirmedStepIds.size());
+        run.port.producedCards().forEach((step, card) -> assertValidVariableCard(run.port.level, card,
+                "Literal step " + step + " did not produce a valid Variable Card."));
+    }
+
     /**
      * Dynamic operator inputs are references: clicking their slot keeps the
      * source Variable Card on the cursor while the slot records that
@@ -142,10 +174,9 @@ class CardBuildWorkflowTest {
         run.port.flushServerChanges();
         assertTrue(run.port.synchronizationRevision() > revisionBeforeReturnFlush,
                 "Dynamic must confirm the returned input card in the player inventory.");
-        run.driver.tick();
-
         assertTrue(run.port.clientCursorIsEmpty(),
                 "The second client prediction must return the input card to its inventory slot.");
+        run.driver.tick();
         drainAfterEveryServerSnapshot(run);
         assertTrue(run.driver.isComplete(), run.driver.status());
     }
