@@ -17,7 +17,7 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private final Map<String, ItemStack> produced = new LinkedHashMap<>();
     private final Map<Integer, ItemStack> placedInputs = new HashMap<>();
     private ItemStack pendingInput = ItemStack.EMPTY;
-    private ItemStack pendingOutput = ItemStack.EMPTY;
+    private int pendingOutputId = -1;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
     private int lastSynchronizedStateId;
@@ -160,7 +160,11 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         if (output.isEmpty() || CardInventory.isBlankVariable(output)) {
             return false;
         }
-        pendingOutput = output.copy();
+        int outputId = CardInventory.variableCardId(output);
+        if (outputId < 0) {
+            return false;
+        }
+        pendingOutputId = outputId;
         return true;
     }
 
@@ -172,19 +176,19 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
 
     @Override
     public boolean outputReturned() {
-        return pendingOutput != null && !pendingOutput.isEmpty()
+        return pendingOutputId >= 0
                 && programmer.slotIsEmpty(LogicProgrammerMenuLayout.writeSlot(programmer.menu()))
-                && CardInventory.findMatchingPlayerStack(programmer.menu(), player(), pendingOutput) != null;
+                && CardInventory.findVariableCardById(player(), pendingOutputId) != null;
     }
 
     @Override
     public void confirmOutput(String stepId) {
-        ItemStack stored = CardInventory.findMatchingPlayerStack(programmer.menu(), player(), pendingOutput);
+        ItemStack stored = CardInventory.findVariableCardById(player(), pendingOutputId);
         if (stored == null) {
             throw new IllegalStateException("\u7b49\u5f85\u5230\u4e86\u8f93\u51fa\u69fd\u66f4\u65b0\uff0c\u4f46\u7f3a\u5c11\u5df2\u540c\u6b65\u7684\u80cc\u5305\u8f93\u51fa");
         }
         produced.put(stepId, stored.copy());
-        pendingOutput = ItemStack.EMPTY;
+        pendingOutputId = -1;
     }
 
     @Override

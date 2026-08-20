@@ -271,7 +271,7 @@ class CardBuildWorkflowTest {
         private ObservedMenuState snapshot;
         private long synchronizationRevision;
         private ItemStack pendingInput = ItemStack.EMPTY;
-        private ItemStack pendingOutput = ItemStack.EMPTY;
+        private int pendingOutputId = -1;
         private int blankSourceSlot = -1;
         private String errorBeforeAction;
         private int returnOutputRequests;
@@ -356,19 +356,19 @@ class CardBuildWorkflowTest {
         String describeState() {
             ItemStack clientWrite = snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu));
             return "last command=" + lastCommand + ", revision=" + synchronizationRevision
-                    + ", client write=" + describe(clientWrite) + ", expected output=" + describe(pendingOutput)
-                    + ", client received=" + describe(findReceivedPlayerStack(pendingOutput))
-                    + ", server received=" + describe(findServerPlayerStack(pendingOutput))
+                    + ", client write=" + describe(clientWrite) + ", output id=" + pendingOutputId
+                    + ", client received=" + describe(findReceivedVariableCard(pendingOutputId))
+                    + ", server received=" + describe(findServerVariableCard(pendingOutputId))
                     + ", trace=" + synchronizationTrace;
         }
 
         boolean serverHasReturnedCurrentOutput() {
             return serverMenu.slots.get(LogicProgrammerMenuLayout.writeSlot(serverMenu)).getItem().isEmpty()
-                    && findServerPlayerStack(pendingOutput) != null;
+                    && findServerVariableCard(pendingOutputId) != null;
         }
 
         boolean clientWriteStillContainsPendingOutput() {
-            return sameStack(snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu)), pendingOutput);
+            return variableCardId(snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu))) == pendingOutputId;
         }
 
         int validCardsInPlayerInventory() {
@@ -538,7 +538,11 @@ class CardBuildWorkflowTest {
             if (output.isEmpty() || isBlankVariable(output)) {
                 return false;
             }
-            pendingOutput = output.copy();
+            int outputId = variableCardId(output);
+            if (outputId < 0) {
+                return false;
+            }
+            pendingOutputId = outputId;
             return true;
         }
 
@@ -559,20 +563,20 @@ class CardBuildWorkflowTest {
 
         @Override
         public boolean outputReturned() {
-            return pendingOutput != null && !pendingOutput.isEmpty()
+            return pendingOutputId >= 0
                     && snapshot.slot(LogicProgrammerMenuLayout.writeSlot(clientMenu)).isEmpty()
-                    && findReceivedPlayerStack(pendingOutput) != null;
+                    && findReceivedVariableCard(pendingOutputId) != null;
         }
 
         @Override
         public void confirmOutput(String stepId) {
-            ItemStack stored = findReceivedPlayerStack(pendingOutput);
+            ItemStack stored = findReceivedVariableCard(pendingOutputId);
             if (stored == null) {
                 throw new IllegalStateException("The returned output was absent from the synchronized inventory.");
             }
             produced.put(stepId, stored.copy());
             confirmedStepIds.add(stepId);
-            pendingOutput = ItemStack.EMPTY;
+            pendingOutputId = -1;
         }
 
         @Override
@@ -656,9 +660,25 @@ class CardBuildWorkflowTest {
             return null;
         }
 
-        private ItemStack findServerPlayerStack(ItemStack expected) {
+        private ItemStack findReceivedVariableCard(int variableId) {
+            if (variableId < 0) {
+                return null;
+            }
+            for (int slot : playerInventorySlots(clientMenu, clientPlayer)) {
+                ItemStack stack = snapshot.slot(slot);
+                if (variableCardId(stack) == variableId) {
+                    return stack;
+                }
+            }
+            return null;
+        }
+
+        private ItemStack findServerVariableCard(int variableId) {
+            if (variableId < 0) {
+                return null;
+            }
             for (ItemStack stack : serverPlayer.getInventory().getNonEquipmentItems()) {
-                if (sameStack(stack, expected)) {
+                if (variableCardId(stack) == variableId) {
                     return stack;
                 }
             }
@@ -704,6 +724,14 @@ class CardBuildWorkflowTest {
                 return false;
             }
             return variable.getVariableFacade(ValueDeseralizationContext.of(level), stack).isValid();
+        }
+
+        private int variableCardId(ItemStack stack) {
+            if (!(stack.getItem() instanceof ItemVariable variable)) {
+                return -1;
+            }
+            IVariableFacade facade = variable.getVariableFacade(ValueDeseralizationContext.of(level), stack);
+            return facade.isValid() ? facade.getId() : -1;
         }
     }
 

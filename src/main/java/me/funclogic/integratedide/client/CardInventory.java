@@ -46,11 +46,25 @@ final class CardInventory {
     }
 
     static ItemStack findVariableCardById(Player player, int variableCardId, String expectedTypeId) {
-        if (player == null) {
-            return null;
-        }
         Identifier expectedId = Identifier.tryParse(expectedTypeId);
         IValueType<?> expectedType = expectedId == null ? null : ValueTypes.REGISTRY.getValueType(expectedId);
+        return findVariableCardById(player, variableCardId, expectedType);
+    }
+
+    /**
+     * Locates a valid Variable Card by Dynamic's stable per-save ID. This is
+     * deliberately not an ItemStack-component comparison: a programmer reset
+     * can rebuild a client-side element while the authoritative returned card
+     * is being synchronized.
+     */
+    static ItemStack findVariableCardById(Player player, int variableCardId) {
+        return findVariableCardById(player, variableCardId, null);
+    }
+
+    private static ItemStack findVariableCardById(Player player, int variableCardId, IValueType<?> expectedType) {
+        if (player == null || variableCardId < 0) {
+            return null;
+        }
         for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
             IVariableFacade facade = variableFacade(stack);
             if (facade != null && facade.isValid() && facade.getId() == variableCardId
