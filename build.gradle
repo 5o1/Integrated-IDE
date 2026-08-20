@@ -143,6 +143,9 @@ dependencies {
     localRuntime "maven.modrinth:oFXrCkDI:${commoncapabilities_modrinth_version}"
     testImplementation platform('org.junit:junit-bom:5.14.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    // Provides a real ephemeral NeoForge server to JUnit. Workflow tests use
+    // Dynamic's actual menu and packet handlers rather than a success mock.
+    testImplementation "net.neoforged:testframework:${project.neo_version}"
     // Needed to compile registry-backed tests; FML receives their runtime
     // copies from the existing localRuntime configuration above.
     testCompileOnly "maven.modrinth:yYzdQHJI:${integrateddynamics_modrinth_version}"

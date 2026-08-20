@@ -106,13 +106,13 @@ final class LogicProgrammerGateway implements LogicProgrammerPlanSink {
     }
 
     /**
-     * Mirrors the Logic Programmer's own reset button. This is a dedicated
-     * Integrated Dynamics packet, not a container click: it returns the
-     * completed Variable Card and clears the now-empty element configuration.
+     * Requests the Logic Programmer's reset action. This is a dedicated
+     * Integrated Dynamics packet, not a container click. Unlike the vanilla
+     * screen's visual prediction, automation must not mutate its local menu
+     * first: the card is considered returned only after the server sends a
+     * newer synchronized container state.
      */
     void returnOutputToPlayer() {
-        menu.returnWriteItemToPlayer();
-        menu.setActiveElementById(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID);
         send(new LogicProgrammerActivateElementPacket(EMPTY_ELEMENT_ID, EMPTY_ELEMENT_ID));
     }
 

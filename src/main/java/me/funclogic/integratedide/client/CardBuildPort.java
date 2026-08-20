@@ -11,6 +11,15 @@ import net.minecraft.world.item.ItemStack;
 interface CardBuildPort {
     boolean isCurrent();
 
+    /**
+     * Monotonically increases only when the client observes a newer
+     * authoritative container or player-inventory synchronization state.
+     *
+     * <p>The driver records this value before every inventory mutation and
+     * never treats local click prediction as an acknowledgement.</p>
+     */
+    long synchronizationRevision();
+
     /** A newly synchronized server-side programmer error, or {@code null}. */
     String serverFailure();
 
@@ -34,7 +43,12 @@ interface CardBuildPort {
 
     void placeBlank();
 
-    void returnBlankRemainder();
+    /**
+     * Returns {@code true} only when a carried remainder required a server
+     * container action. A one-card stack has no remainder and therefore no
+     * synchronization event to wait for.
+     */
+    boolean returnBlankRemainder();
 
     boolean blankRemainderReturned();
 

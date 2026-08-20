@@ -23,6 +23,8 @@ public final class CardBuildDriver {
     private final List<ExpressionCompiler.CardStep> steps;
     private int stepIndex;
     private int inputIndex;
+    /** The server snapshot revision that was current before the last menu mutation. */
+    private long commandRevision;
     private Phase phase = Phase.IDLE;
     private Component status = Component.translatable("integratedide.build.waiting");
 
@@ -174,14 +176,14 @@ public final class CardBuildDriver {
     }
 
     private boolean pickupInput(ExpressionCompiler.CardStep step) {
-        port.pickupInput(step.inputs().get(inputIndex));
+        issue(() -> port.pickupInput(step.inputs().get(inputIndex)));
         phase = Phase.WAIT_INPUT_HELD;
         return false;
     }
 
     private boolean waitForInputHeld(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!port.inputHeld(input)) {
+        if (!synchronizedAfterCommand() || !port.inputHeld(input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_held", inputIndex + 1));
         }
         phase = Phase.PLACE_INPUT;
@@ -189,14 +191,14 @@ public final class CardBuildDriver {
     }
 
     private boolean placeInput() {
-        port.placeInput(inputIndex);
+        issue(() -> port.placeInput(inputIndex));
         phase = Phase.WAIT_INPUT_PLACED;
         return false;
     }
 
     private boolean waitForInputPlaced(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!port.inputPlaced(inputIndex, input)) {
+        if (!synchronizedAfterCommand() || !port.inputPlaced(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_placed", inputIndex + 1));
         }
         inputIndex++;
@@ -205,13 +207,13 @@ public final class CardBuildDriver {
     }
 
     private boolean pickupBlank() {
-        port.pickupBlank();
+        issue(port::pickupBlank);
         phase = Phase.WAIT_BLANK_HELD;
         return false;
     }
 
     private boolean waitForBlankHeld() {
-        if (!port.blankHeld()) {
+        if (!synchronizedAfterCommand() || !port.blankHeld()) {
             return waiting(Component.translatable("integratedide.build.wait.blank_held"));
         }
         phase = Phase.PLACE_BLANK;
@@ -219,13 +221,13 @@ public final class CardBuildDriver {
     }
 
     private boolean placeBlank() {
-        port.placeBlank();
+        issue(port::placeBlank);
         phase = Phase.WAIT_OUTPUT_READY;
         return false;
     }
 
     private boolean waitForOutputReady() {
-        if (!port.outputReady()) {
+        if (!synchronizedAfterCommand() || !port.outputReady()) {
             return waiting(Component.translatable("integratedide.build.wait.output_ready"));
         }
         phase = Phase.RETURN_REMAINDER;
@@ -233,13 +235,18 @@ public final class CardBuildDriver {
     }
 
     private boolean returnRemainder() {
-        port.returnBlankRemainder();
+        commandRevision = port.synchronizationRevision();
+        if (!port.returnBlankRemainder()) {
+            inputIndex = 0;
+            phase = Phase.CLEANUP_INPUT;
+            return true;
+        }
         phase = Phase.WAIT_REMAINDER_RETURNED;
         return false;
     }
 
     private boolean waitForRemainderReturned() {
-        if (!port.blankRemainderReturned()) {
+        if (!synchronizedAfterCommand() || !port.blankRemainderReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.remainder"));
         }
         // The dedicated reset packet clears the active element, so all
@@ -250,13 +257,13 @@ public final class CardBuildDriver {
     }
 
     private boolean returnOutput() {
-        port.returnOutput();
+        issue(port::returnOutput);
         phase = Phase.WAIT_OUTPUT_RETURNED;
         return false;
     }
 
     private boolean waitForOutputReturned() {
-        if (!port.outputReturned()) {
+        if (!synchronizedAfterCommand() || !port.outputReturned()) {
             return waiting(Component.translatable("integratedide.build.wait.output_stored"));
         }
         phase = Phase.CONFIRM_OUTPUT;
@@ -276,14 +283,14 @@ public final class CardBuildDriver {
             phase = Phase.RETURN_OUTPUT;
             return true;
         }
-        port.cleanupInput(inputIndex);
+        issue(() -> port.cleanupInput(inputIndex));
         phase = Phase.WAIT_INPUT_RETURNED;
         return false;
     }
 
     private boolean waitForInputReturned(ExpressionCompiler.CardStep step) {
         String input = step.inputs().get(inputIndex);
-        if (!port.inputReturned(inputIndex, input)) {
+        if (!synchronizedAfterCommand() || !port.inputReturned(inputIndex, input)) {
             return waiting(Component.translatable("integratedide.build.wait.input_returned"));
         }
         inputIndex++;
@@ -294,6 +301,19 @@ public final class CardBuildDriver {
     private boolean waiting(Component message) {
         status = message;
         return false;
+    }
+
+    /**
+     * Dispatch a container mutation and establish the exact client snapshot
+     * that must be superseded before its postcondition may be observed.
+     */
+    private void issue(Runnable command) {
+        commandRevision = port.synchronizationRevision();
+        command.run();
+    }
+
+    private boolean synchronizedAfterCommand() {
+        return port.synchronizationRevision() > commandRevision;
     }
 
     public static int countBlankVariableCards(Player player) {

@@ -20,16 +20,29 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private ItemStack pendingOutput = ItemStack.EMPTY;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
+    private int lastSynchronizedStateId;
+    private long synchronizationRevision;
 
     LogicProgrammerCardBuildPort(ContainerLogicProgrammerBase menu, Map<String, ItemStack> existingCards) {
         this.programmer = new LogicProgrammerGateway(menu);
         this.produced.putAll(existingCards);
+        this.lastSynchronizedStateId = menu.getStateId();
     }
 
     @Override
     public boolean isCurrent() {
         Minecraft minecraft = Minecraft.getInstance();
         return minecraft.player != null && minecraft.gameMode != null && programmer.isCurrentMenu(minecraft.player);
+    }
+
+    @Override
+    public long synchronizationRevision() {
+        int currentStateId = programmer.menu().getStateId();
+        if (currentStateId != lastSynchronizedStateId) {
+            lastSynchronizedStateId = currentStateId;
+            synchronizationRevision++;
+        }
+        return synchronizationRevision;
     }
 
     @Override
@@ -122,13 +135,18 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     }
 
     @Override
-    public void returnBlankRemainder() {
+    public boolean returnBlankRemainder() {
+        if (programmer.carriedItem().isEmpty()) {
+            blankSourceSlot = -1;
+            return false;
+        }
         if (blankSourceSlot < 0) {
             throw new IllegalStateException("\u80cc\u5305\u6ca1\u6709\u7a7a\u95f4\u653e\u56de\u53d8\u91cf\u5361\u961f\u5217");
         }
         beforeServerAction();
         programmer.pickup(player(), blankSourceSlot, 0);
         blankSourceSlot = -1;
+        return true;
     }
 
     @Override
