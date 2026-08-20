@@ -265,12 +265,12 @@ class CardBuildWorkflowTest {
         private final ContainerLogicProgrammer clientMenu;
         private final boolean predictOutputClear;
         private final Map<String, ItemStack> produced = new LinkedHashMap<>();
-        private final Map<Integer, ItemStack> placedInputs = new LinkedHashMap<>();
+        private final Map<Integer, Integer> placedInputIds = new LinkedHashMap<>();
         private final List<String> confirmedStepIds = new ArrayList<>();
         private final List<String> synchronizationTrace = new ArrayList<>();
         private ObservedMenuState snapshot;
         private long synchronizationRevision;
-        private ItemStack pendingInput = ItemStack.EMPTY;
+        private int pendingInputId = -1;
         private int pendingOutputId = -1;
         private int blankSourceSlot = -1;
         private String errorBeforeAction;
@@ -453,11 +453,12 @@ class CardBuildWorkflowTest {
             if (input == null) {
                 throw new IllegalStateException("Missing produced input card " + stepId);
             }
-            int sourceSlot = findPlayerSlot(input);
+            int inputId = variableCardId(input);
+            int sourceSlot = findVariableCardSlot(inputId);
             if (sourceSlot < 0) {
                 throw new IllegalStateException("The synchronized inventory no longer contains input " + stepId);
             }
-            pendingInput = input.copy();
+            pendingInputId = inputId;
             beforeServerAction();
             serverMenu.clicked(sourceSlot, 0, ContainerInput.PICKUP, serverPlayer);
         }
@@ -465,7 +466,7 @@ class CardBuildWorkflowTest {
         @Override
         public boolean inputHeld(String stepId) {
             ItemStack expected = produced.get(stepId);
-            return expected != null && sameStack(snapshot.carried, expected);
+            return expected != null && variableCardId(snapshot.carried) == variableCardId(expected);
         }
 
         @Override
@@ -476,19 +477,19 @@ class CardBuildWorkflowTest {
         @Override
         public void placeInput(int inputIndex) {
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            placedInputs.put(inputIndex, pendingInput.copy());
+            placedInputIds.put(inputIndex, pendingInputId);
             beforeServerAction();
             serverMenu.clicked(target, 0, ContainerInput.PICKUP, serverPlayer);
         }
 
         @Override
         public boolean inputPlaced(int inputIndex, String stepId) {
-            ItemStack expected = placedInputs.get(inputIndex);
-            if (expected == null || !inputSlotReady(inputIndex)) {
+            Integer expectedId = placedInputIds.get(inputIndex);
+            if (expectedId == null || !inputSlotReady(inputIndex)) {
                 return false;
             }
             int target = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            return snapshot.carried.isEmpty() && sameStack(snapshot.slot(target), expected);
+            return snapshot.carried.isEmpty() && variableCardId(snapshot.slot(target)) == expectedId;
         }
 
         @Override
@@ -593,12 +594,12 @@ class CardBuildWorkflowTest {
 
         @Override
         public boolean inputReturned(int inputIndex, String stepId) {
-            ItemStack expected = placedInputs.get(inputIndex);
-            if (expected == null || !inputSlotReady(inputIndex)) {
+            Integer expectedId = placedInputIds.get(inputIndex);
+            if (expectedId == null || !inputSlotReady(inputIndex)) {
                 return false;
             }
             int inputSlot = LogicProgrammerMenuLayout.inputSlot(clientMenu, inputIndex);
-            return snapshot.slot(inputSlot).isEmpty() && findReceivedPlayerStack(expected) != null;
+            return snapshot.slot(inputSlot).isEmpty() && findReceivedVariableCard(expectedId) != null;
         }
 
         @Override
@@ -640,24 +641,14 @@ class CardBuildWorkflowTest {
             return -1;
         }
 
-        private int findPlayerSlot(ItemStack expected) {
+        private int findVariableCardSlot(int variableId) {
             for (int index = 0; index < clientMenu.slots.size(); index++) {
                 Slot slot = clientMenu.slots.get(index);
-                if (slot.container == clientPlayer.getInventory() && sameStack(slot.getItem(), expected)) {
+                if (slot.container == clientPlayer.getInventory() && variableCardId(slot.getItem()) == variableId) {
                     return index;
                 }
             }
             return -1;
-        }
-
-        private ItemStack findReceivedPlayerStack(ItemStack expected) {
-            for (int slot : playerInventorySlots(clientMenu, clientPlayer)) {
-                ItemStack stack = snapshot.slot(slot);
-                if (sameStack(stack, expected)) {
-                    return stack;
-                }
-            }
-            return null;
         }
 
         private ItemStack findReceivedVariableCard(int variableId) {
@@ -821,10 +812,6 @@ class CardBuildWorkflowTest {
         public boolean matches(ItemStack stack) {
             return ItemStack.matches(remote, stack);
         }
-    }
-
-    private static boolean sameStack(ItemStack left, ItemStack right) {
-        return left.getCount() == right.getCount() && ItemStack.isSameItemSameComponents(left, right);
     }
 
     private static void assertTrue(boolean condition) {

@@ -15,8 +15,8 @@ import org.cyclops.integrateddynamics.inventory.container.ContainerLogicProgramm
 final class LogicProgrammerCardBuildPort implements CardBuildPort {
     private final LogicProgrammerGateway programmer;
     private final Map<String, ItemStack> produced = new LinkedHashMap<>();
-    private final Map<Integer, ItemStack> placedInputs = new HashMap<>();
-    private ItemStack pendingInput = ItemStack.EMPTY;
+    private final Map<Integer, Integer> placedInputIds = new HashMap<>();
+    private int pendingInputId = -1;
     private int pendingOutputId = -1;
     private int blankSourceSlot = -1;
     private String errorBeforeAction;
@@ -73,11 +73,12 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
         if (input == null) {
             throw new IllegalStateException("\u7f3a\u5c11\u4e2d\u95f4\u53d8\u91cf\u5361 " + stepId);
         }
-        int sourceSlot = CardInventory.findPlayerSlot(programmer.menu(), player, input);
+        int inputId = CardInventory.variableCardId(input);
+        int sourceSlot = CardInventory.findVariableCardSlotById(programmer.menu(), player, inputId);
         if (sourceSlot < 0) {
             throw new IllegalStateException("\u627e\u4e0d\u5230\u4e2d\u95f4\u53d8\u91cf\u5361\uff1b\u751f\u6210\u671f\u95f4\u8bf7\u52ff\u79fb\u52a8\u80cc\u5305\u7269\u54c1");
         }
-        pendingInput = input.copy();
+        pendingInputId = inputId;
         beforeServerAction();
         programmer.pickup(player, sourceSlot, 0);
     }
@@ -85,7 +86,8 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     @Override
     public boolean inputHeld(String stepId) {
         ItemStack expected = produced.get(stepId);
-        return expected != null && ItemStack.isSameItemSameComponents(programmer.carriedItem(), expected);
+        return expected != null && CardInventory.variableCardId(programmer.carriedItem())
+                == CardInventory.variableCardId(expected);
     }
 
     @Override
@@ -96,20 +98,20 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
     @Override
     public void placeInput(int inputIndex) {
         int target = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
-        placedInputs.put(inputIndex, pendingInput.copy());
+        placedInputIds.put(inputIndex, pendingInputId);
         beforeServerAction();
         programmer.pickup(player(), target, 0);
     }
 
     @Override
     public boolean inputPlaced(int inputIndex, String stepId) {
-        ItemStack expected = placedInputs.get(inputIndex);
-        if (expected == null || !inputSlotReady(inputIndex)) {
+        Integer expectedId = placedInputIds.get(inputIndex);
+        if (expectedId == null || !inputSlotReady(inputIndex)) {
             return false;
         }
         int target = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
         return programmer.carriedItem().isEmpty()
-                && ItemStack.isSameItemSameComponents(programmer.slotItem(target), expected);
+                && CardInventory.variableCardId(programmer.slotItem(target)) == expectedId;
     }
 
     @Override
@@ -206,17 +208,17 @@ final class LogicProgrammerCardBuildPort implements CardBuildPort {
 
     @Override
     public boolean inputReturned(int inputIndex, String stepId) {
-        ItemStack expected = placedInputs.get(inputIndex);
-        if (expected == null || !inputSlotReady(inputIndex)) {
+        Integer expectedId = placedInputIds.get(inputIndex);
+        if (expectedId == null || !inputSlotReady(inputIndex)) {
             return false;
         }
         int inputSlot = LogicProgrammerMenuLayout.inputSlot(programmer.menu(), inputIndex);
         if (!programmer.slotIsEmpty(inputSlot)) {
             return false;
         }
-        boolean returned = CardInventory.findPlayerSlot(programmer.menu(), player(), expected) >= 0;
+        boolean returned = CardInventory.findVariableCardSlotById(programmer.menu(), player(), expectedId) >= 0;
         if (returned) {
-            placedInputs.remove(inputIndex);
+            placedInputIds.remove(inputIndex);
         }
         return returned;
     }

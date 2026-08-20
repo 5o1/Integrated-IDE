@@ -26,23 +26,18 @@ final class CardInventory {
         return -1;
     }
 
-    static int findPlayerSlot(ContainerLogicProgrammerBase menu, Player player, ItemStack expected) {
+    /** Finds a valid Variable Card in a currently visible player slot by its Dynamic ID. */
+    static int findVariableCardSlotById(ContainerLogicProgrammerBase menu, Player player, int variableCardId) {
+        if (variableCardId < 0) {
+            return -1;
+        }
         for (int index = 0; index < menu.slots.size(); index++) {
             Slot slot = menu.slots.get(index);
-            if (slot.container == player.getInventory() && ItemStack.isSameItemSameComponents(slot.getItem(), expected)) {
+            if (slot.container == player.getInventory() && variableCardId(slot.getItem()) == variableCardId) {
                 return index;
             }
         }
         return -1;
-    }
-
-    static ItemStack findMatchingPlayerStack(ContainerLogicProgrammerBase menu, Player player, ItemStack expected) {
-        for (Slot slot : menu.slots) {
-            if (slot.container == player.getInventory() && ItemStack.isSameItemSameComponents(slot.getItem(), expected)) {
-                return slot.getItem();
-            }
-        }
-        return null;
     }
 
     static ItemStack findVariableCardById(Player player, int variableCardId, String expectedTypeId) {
